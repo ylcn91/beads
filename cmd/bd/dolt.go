@@ -1482,11 +1482,30 @@ func showDoltConfig(testConnection bool) {
 		}
 	}
 
-	// Show config sources
+	// Show config sources. List the accepted endpoint env vars explicitly so
+	// operators can tell which BEADS_DOLT_* names are honored (GH#3949).
 	fmt.Println("\nConfig sources (priority order):")
-	fmt.Println("  1. Environment variables (BEADS_DOLT_*)")
+	fmt.Println("  1. Environment variables:")
+	fmt.Println("       BEADS_DOLT_SERVER_HOST, BEADS_DOLT_SERVER_PORT, BEADS_DOLT_SERVER_USER,")
+	fmt.Println("       BEADS_DOLT_SERVER_DATABASE, BEADS_DOLT_SERVER_TLS, BEADS_DOLT_SERVER_SOCKET,")
+	fmt.Println("       BEADS_DOLT_SERVER_MODE, BEADS_DOLT_SHARED_SERVER, BEADS_DOLT_PASSWORD,")
+	fmt.Println("       BEADS_DOLT_PORT (orchestrator legacy)")
 	fmt.Println("  2. metadata.json (local, gitignored)")
 	fmt.Println("  3. config.yaml (team defaults)")
+
+	// Warn about endpoint env vars that look correct but are silently ignored
+	// because they drop the required SERVER_ infix (GH#3949).
+	for _, legacy := range []struct{ wrong, right string }{
+		{"BEADS_DOLT_HOST", "BEADS_DOLT_SERVER_HOST"},
+		{"BEADS_DOLT_USER", "BEADS_DOLT_SERVER_USER"},
+		{"BEADS_DOLT_DATABASE", "BEADS_DOLT_SERVER_DATABASE"},
+		{"BEADS_DOLT_TLS", "BEADS_DOLT_SERVER_TLS"},
+		{"BEADS_DOLT_SOCKET", "BEADS_DOLT_SERVER_SOCKET"},
+	} {
+		if _, ok := os.LookupEnv(legacy.wrong); ok {
+			fmt.Printf("  %s %s is set but ignored; use %s\n", ui.RenderWarn("[ignored]"), legacy.wrong, legacy.right)
+		}
+	}
 }
 
 func setDoltConfig(key, value string, updateConfig bool) {
