@@ -23,6 +23,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/dolt"
 	"github.com/steveyegge/beads/internal/storage/doltutil"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/templates/agents"
 	"github.com/steveyegge/beads/internal/ui"
 	"github.com/steveyegge/beads/internal/utils"
@@ -959,6 +960,27 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 				// Non-fatal — project init should succeed even if global DB creation fails
 			} else if !quiet {
 				fmt.Printf("  %s Global database %s available\n", ui.RenderPass("✓"), doltserver.GlobalDatabaseName)
+			}
+		}
+
+		// GH#3743: before --from-jsonl creates/migrates the shared-server target,
+		// probe it read-only. A read-only open runs schema.CheckForwardDrift, so
+		// if the shared server already hosts this database at a schema version
+		// ahead of this binary we abort now — before any writes — instead of
+		// letting the import die mid-way with the user's data stranded in Dolt
+		// snapshots while the binary can't read the newer schema. The JSONL
+		// source is left untouched so a newer bd can retry. Non-skew probe errors
+		// (e.g. the database does not exist yet) fall through to the normal open.
+		if fromJSONL && (sharedServer || doltserver.IsSharedServerMode()) {
+			probeCfg := *doltCfg
+			probeCfg.CreateIfMissing = false
+			probeCfg.ReadOnly = true
+			if probeStore, probeErr := newDoltStore(ctx, &probeCfg); probeErr != nil {
+				if schema.IsSchemaSkewError(probeErr) {
+					FatalError("shared server database %q has a newer schema than this bd binary; upgrade bd before importing with --from-jsonl (your JSONL source is left unchanged): %v", dbName, probeErr)
+				}
+			} else {
+				_ = probeStore.Close()
 			}
 		}
 
