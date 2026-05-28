@@ -667,16 +667,13 @@ var listCmd = &cobra.Command{
 			}
 		}
 
-		// When --sort is specified, don't pass Limit to SQL — the hardcoded
-		// ORDER BY would truncate before Go-side sorting (GH#1237).
-		// Instead, apply limit in Go after sortIssues().
+		// SQL-side sort means we can pass --limit straight through. Fetch
+		// one extra row so we can distinguish "exactly N matches" from
+		// "N+ matches truncated" without running a second count query
+		// (GH#3212). The narrow path honors filter.SortBy in SQL; the wide
+		// path keeps its hardcoded ORDER BY and Go-side sortIssues, so it
+		// still has to disable LIMIT when --sort is set (GH#1237).
 		sqlLimit := effectiveLimit
-		if sortBy != "" {
-			sqlLimit = 0
-		}
-
-		// Fetch one extra row so we can distinguish "exactly N matches" from
-		// "N+ matches truncated" without running a second count query (GH#3212).
 		if sqlLimit > 0 {
 			sqlLimit++
 		}
@@ -686,6 +683,8 @@ var listCmd = &cobra.Command{
 			Limit:         sqlLimit,
 			MaxRows:       maxRows,
 			MaxRowsSource: maxRowsSource,
+			SortBy:        sortBy,
+			SortReverse:   reverse,
 		}
 
 		// --ready flag: show only open issues (excludes hooked/in_progress/blocked/deferred) (bd-ihu31)
@@ -1088,6 +1087,63 @@ var listCmd = &cobra.Command{
 			return
 		}
 
+		// Render-shape selector. Compact and agent-mode rendering pull the
+		// narrow IssueSummary projection (D3 / be-nu4.3.2) — sort, filter,
+		// and limit are all SQL-side via SearchIssueSummaries. The wide
+		// path (--watch, --pretty, --format, JSON, --long, --ready) needs
+		// fields outside the summary projection or GetReadyWork semantics,
+		// so it stays on GetReadyWork or SearchIssues + Go-side sortIssues.
+		useNarrow := !readyFlag && !watchMode && !prettyFormat && formatStr == "" && !jsonOutput && (ui.IsAgentMode() || !longFormat)
+		if useNarrow {
+			summaries, err := activeStore.SearchIssueSummaries(ctx, "", filter)
+			if err != nil {
+				FatalError("%v", err)
+			}
+			truncated := effectiveLimit > 0 && len(summaries) > effectiveLimit
+			if truncated {
+				summaries = summaries[:effectiveLimit]
+			}
+
+			maybeShowUpgradeNotification()
+
+			issueIDs := make([]string, len(summaries))
+			for i, s := range summaries {
+				issueIDs[i] = s.ID
+			}
+			blockedByMap, blocksMap, parentMap, _ := activeStore.GetBlockingInfoForIssues(ctx, issueIDs)
+
+			var buf strings.Builder
+			if ui.IsAgentMode() {
+				for _, s := range summaries {
+					formatAgentIssue(&buf, s, blockedByMap[s.ID], blocksMap[s.ID], parentMap[s.ID])
+				}
+				fmt.Print(buf.String())
+				printTruncationHint(truncated, effectiveLimit)
+				return
+			}
+
+			for _, s := range summaries {
+				formatIssueCompact(&buf, s, s.Labels, blockedByMap[s.ID], blocksMap[s.ID], parentMap[s.ID])
+			}
+
+			if err := ui.ToPager(buf.String(), ui.PagerOptions{NoPager: noPager}); err != nil {
+				if _, writeErr := fmt.Fprint(os.Stdout, buf.String()); writeErr != nil {
+					fmt.Fprintf(os.Stderr, "Error writing output: %v\n", writeErr)
+				}
+			}
+			printTruncationHint(truncated, effectiveLimit)
+			maybeShowTip(store)
+			return
+		}
+
+		// Wide path (full-hydration): --long / --watch / --pretty / --format /
+		// JSON / --ready. GetReadyWork or SearchIssues; sort is Go-side.
+		// SearchIssues ignores filter.SortBy, so we clear Limit when --sort
+		// is used to avoid truncating before Go-side sort (GH#1237).
+		wideFilter := filter
+		if sortBy != "" {
+			wideFilter.Limit = 0
+		}
 		var issues []*types.Issue
 		if readyFlag {
 			// Use blocker-aware GetReadyWork semantics (GH#3478).
@@ -1107,7 +1163,7 @@ var listCmd = &cobra.Command{
 				filter.SkipWisps = true
 			}
 			var err error
-			issues, err = activeStore.SearchIssues(ctx, "", filter)
+			issues, err = activeStore.SearchIssues(ctx, "", wideFilter)
 			if err != nil {
 				handleMaxRowsError(err)
 				FatalError("%v", err)
@@ -1117,8 +1173,9 @@ var listCmd = &cobra.Command{
 		// Apply sorting
 		sortIssues(issues, sortBy, reverse)
 
-		// Detect truncation (GH#3212). We fetched effectiveLimit+1 above, so any
-		// overflow means more matches exist than we're displaying.
+		// Detect truncation (GH#3212). We fetched effectiveLimit+1 above (or
+		// the full set when --sort was used), so any overflow means more
+		// matches exist than we're displaying.
 		truncated := effectiveLimit > 0 && len(issues) > effectiveLimit
 		if truncated {
 			issues = issues[:effectiveLimit]
@@ -1169,44 +1226,17 @@ var listCmd = &cobra.Command{
 		// Show upgrade notification if needed
 		maybeShowUpgradeNotification()
 
-		issueIDs := make([]string, len(issues))
 		labelsMap := make(map[string][]string, len(issues))
-		for i, issue := range issues {
-			issueIDs[i] = issue.ID
+		for _, issue := range issues {
 			if len(issue.Labels) > 0 {
 				labelsMap[issue.ID] = issue.Labels
 			}
 		}
 
-		// Load blocking info for displayed issues only (bd-7di).
-		// Previously loaded ALL dependency records which was O(total_issues) and took 2-4s.
-		// Now scoped to only the displayed issues, making it O(displayed_issues).
-		// Best effort: display gracefully degrades with empty data
-		blockedByMap, blocksMap, parentMap, _ := activeStore.GetBlockingInfoForIssues(ctx, issueIDs)
-
-		// Build output in buffer for pager support (bd-jdz3)
 		var buf strings.Builder
-		if ui.IsAgentMode() {
-			// Agent mode: ultra-compact, no colors, no pager
-			for _, issue := range issues {
-				formatAgentIssue(&buf, issue, blockedByMap[issue.ID], blocksMap[issue.ID], parentMap[issue.ID])
-			}
-			fmt.Print(buf.String())
-			printTruncationHint(truncated, effectiveLimit)
-			return
-		} else if longFormat {
-			// Long format: multi-line with details
-			buf.WriteString(fmt.Sprintf("\nFound %d issues:\n\n", len(issues)))
-			for _, issue := range issues {
-				labels := labelsMap[issue.ID]
-				formatIssueLong(&buf, issue, labels, skipLabels)
-			}
-		} else {
-			// Compact format: one line per issue
-			for _, issue := range issues {
-				labels := labelsMap[issue.ID]
-				formatIssueCompact(&buf, issue, labels, blockedByMap[issue.ID], blocksMap[issue.ID], parentMap[issue.ID])
-			}
+		buf.WriteString(fmt.Sprintf("\nFound %d issues:\n\n", len(issues)))
+		for _, issue := range issues {
+			formatIssueLong(&buf, issue, labelsMap[issue.ID], skipLabels)
 		}
 
 		// AD-02: footer note when --skip-labels is in effect (suppressed under --quiet).
