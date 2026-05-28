@@ -47,10 +47,10 @@ func TestVerifyProjectIdentity_SkipsGlobalSentinelInDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Store with a non-global database name, but simulate the DB having the
-	// sentinel project_id (as would happen when connecting to beads_global
-	// via a custom DSN or port misconfiguration).
-	store := &DoltStore{database: "some_other_db"}
+	// A store with a non-global database name would simulate the DB having the
+	// sentinel project_id (as would happen when connecting to beads_global via a
+	// custom DSN or port misconfiguration). GetMetadata can't be mocked here, so
+	// this test only asserts the sentinel constant the skip path depends on.
 
 	// We can't easily mock GetMetadata, so we'll verify the code path by
 	// checking that when dbID == GlobalProjectID, it skips.
