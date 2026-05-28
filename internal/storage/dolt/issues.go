@@ -181,12 +181,18 @@ func (s *DoltStore) UpdateIssue(ctx context.Context, id string, updates map[stri
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = issueops.UpdateIssueInTx(ctx, tx, id, updates, actor)
+	result, err := issueops.UpdateIssueInTx(ctx, tx, id, updates, actor)
 	if err != nil {
 		return err
 	}
 
-	for _, table := range []string{"issues", "events"} {
+	// Dolt versioning for permanent issues.
+	// GH#2455: Stage only the tables we modified, then commit without -A.
+	tables := []string{"issues"}
+	if result.EventRecorded {
+		tables = append(tables, "events")
+	}
+	for _, table := range tables {
 		_, _ = tx.ExecContext(ctx, "CALL DOLT_ADD(?)", table)
 	}
 	commitMsg := fmt.Sprintf("bd: update %s", id)
