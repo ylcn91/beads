@@ -133,7 +133,8 @@ func TestOutputContextFunction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer stubIsEphemeralBranch(tt.ephemeralMode)()
-			defer stubPrimeHasGitRemote(!tt.localOnlyMode)() // localOnly = !primeHasGitRemote
+			defer stubPrimeHasGitRemote(!tt.localOnlyMode)()
+			defer stubPrimeHasSyncRemote(!tt.localOnlyMode)()
 
 			var buf bytes.Buffer
 			err := outputPrimeContext(&buf, tt.mcpMode, tt.stealthMode)
@@ -292,6 +293,16 @@ func stubPrimeHasGitRemote(hasRemote bool) func() {
 	}
 	return func() {
 		primeHasGitRemote = original
+	}
+}
+
+func stubPrimeHasSyncRemote(hasSyncRemote bool) func() {
+	original := primeHasSyncRemote
+	primeHasSyncRemote = func() bool {
+		return hasSyncRemote
+	}
+	return func() {
+		primeHasSyncRemote = original
 	}
 }
 
