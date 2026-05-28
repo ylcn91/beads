@@ -11,11 +11,16 @@ import (
 // GetEpicsEligibleForClosureInTx returns epics whose children are all closed.
 // nolint:gosec // G201: table names are hardcoded, placeholders contain only ? markers
 func GetEpicsEligibleForClosureInTx(ctx context.Context, tx *sql.Tx) ([]*types.EpicStatus, error) {
-	// Step 1: Get open epic IDs (single-table scan)
+	// Step 1: Get open epic IDs (single-table scan). Skip pinned/protected
+	// epics so they are never reported as close-eligible (GH#3816): both the
+	// frozen 'pinned' status and the persistent `pinned` flag exempt an epic
+	// from automatic closure, mirroring the ready-work filter.
 	epicRows, err := tx.QueryContext(ctx, `
 		SELECT id FROM issues
 		WHERE issue_type = 'epic'
 		  AND status != 'closed'
+		  AND status != 'pinned'
+		  AND (pinned = 0 OR pinned IS NULL)
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get epics: %w", err)
