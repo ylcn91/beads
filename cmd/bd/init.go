@@ -80,6 +80,7 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 		nonInteractiveFlag, _ := cmd.Flags().GetBool("non-interactive")
 		roleFlag, _ := cmd.Flags().GetString("role")
 		fromJSONL, _ := cmd.Flags().GetBool("from-jsonl")
+		initIfMissing, _ := cmd.Flags().GetBool("init-if-missing")
 		initRemote, _ := cmd.Flags().GetString("remote")
 		initRemoteChanged := cmd.Flags().Changed("remote")
 		// Dolt server connection flags
@@ -369,6 +370,16 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 		// docs/adr/0002-init-safety-invariants.md).
 		if !reinitLocal {
 			if err := checkExistingBeadsData(prefix); err != nil {
+				// --init-if-missing makes init idempotent for orchestration:
+				// an already-initialized workspace is a success, not exit 1
+				// (GH#3490). checkExistingBeadsData only errors when a database
+				// already exists, so this never masks a fresh-init failure.
+				if initIfMissing {
+					if !quiet {
+						fmt.Fprintln(os.Stderr, "bd init: workspace already initialized; nothing to do (--init-if-missing)")
+					}
+					return
+				}
 				FatalError("%v", err)
 			}
 		}
@@ -1650,6 +1661,7 @@ func init() {
 	initCmd.Flags().Bool("reinit-local", false, "Re-initialize local .beads/ over existing local data. Does NOT authorize remote divergence; see --discard-remote.")
 	initCmd.Flags().Bool("discard-remote", false, "Authorize discarding the configured remote's Dolt history when re-initializing. Requires --destroy-token in non-interactive mode; see 'bd help init-safety'.")
 	initCmd.Flags().Bool("from-jsonl", false, "Import issues from configured import.path; refuses remote history unless --discard-remote authorizes replacement")
+	initCmd.Flags().Bool("init-if-missing", false, "Exit 0 (no-op) instead of failing when the workspace is already initialized; for idempotent orchestration")
 	initCmd.Flags().String("destroy-token", "", "Explicit confirmation token for destructive re-init in non-interactive mode (format: 'DESTROY-<prefix>')")
 	initCmd.Flags().String("agents-template", "", "Path to custom AGENTS.md template (overrides embedded default)")
 	initCmd.Flags().String("agents-profile", "", "AGENTS.md profile: 'minimal' (default, pointer to bd prime) or 'full' (complete command reference)")
