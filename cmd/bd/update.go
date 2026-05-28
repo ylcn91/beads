@@ -364,14 +364,27 @@ create, update, show, or close operation).`,
 				}
 				regularUpdates["metadata"] = merged
 			}
-			// Handle append_notes: combine existing notes with new content
+			// Handle append_notes atomically: re-read the current notes inside a
+			// transaction so rapid concurrent appends don't clobber each other
+			// (GH#3964). Combining the pre-update issue.Notes snapshot taken above
+			// with the new text and writing it back is a lost-update race.
 			if appendNotes, ok := updates["append_notes"].(string); ok {
-				combined := issue.Notes
-				if combined != "" {
-					combined += "\n"
+				if err := issueStore.RunInTransaction(ctx, fmt.Sprintf("bd: append notes %s", result.ResolvedID), func(tx storage.Transaction) error {
+					cur, err := tx.GetIssue(ctx, result.ResolvedID)
+					if err != nil {
+						return err
+					}
+					combined := cur.Notes
+					if combined != "" {
+						combined += "\n"
+					}
+					combined += appendNotes
+					return tx.UpdateIssue(ctx, result.ResolvedID, map[string]interface{}{"notes": combined}, actor)
+				}); err != nil {
+					fmt.Fprintf(os.Stderr, "Error appending notes to %s: %v\n", id, err)
+					result.Close()
+					continue
 				}
-				combined += appendNotes
-				regularUpdates["notes"] = combined
 			}
 			if len(regularUpdates) > 0 {
 				if err := issueStore.UpdateIssue(ctx, result.ResolvedID, regularUpdates, actor); err != nil {
