@@ -631,22 +631,36 @@ func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason stri
 		table = "wisps"
 	}
 
-	if _, err := issueops.CloseIssueWithoutEventInTx(ctx, t.txFor(table), id, reason, actor, session); err != nil {
+	// Use the event-recording variant so close events reach the audit log,
+	// matching the non-transactional DoltStore.CloseIssue path (GH#3808).
+	if _, err := issueops.CloseIssueInTx(ctx, t.txFor(table), id, reason, actor, session); err != nil {
 		return wrapExecError("close issue in tx", err)
 	}
+	_, _, eventTable, _ := issueops.WispTableRouting(table == "wisps")
 	t.dirty.MarkDirty(table)
+	t.dirty.MarkDirty(eventTable)
 	return nil
 }
 
 func (t *doltTransaction) DeleteIssue(ctx context.Context, id string) error {
-	table := "issues"
-	if t.isActiveWisp(ctx, id) {
-		table = "wisps"
-	}
-	if err := issueops.DeleteIssueInTx(ctx, t.txFor(table), id); err != nil {
+	isWisp := t.isActiveWisp(ctx, id)
+	issueTable, labelTable, eventTable, depTable := issueops.WispTableRouting(isWisp)
+	if err := issueops.DeleteIssueInTx(ctx, t.txFor(issueTable), id); err != nil {
 		return wrapExecError("delete issue in tx", err)
 	}
-	t.dirty.MarkDirty(table)
+	// Deleting an issue cascades (ON DELETE CASCADE) to its dependent rows, so
+	// stage every affected table — not just the issue row — to keep the Dolt
+	// commit consistent, mirroring DoltStore.DeleteIssue (GH#3808). MarkDirty
+	// ignores dolt-ignored wisp tables, so the wisp path stages nothing here.
+	t.dirty.MarkDirty(issueTable)
+	t.dirty.MarkDirty(depTable)
+	t.dirty.MarkDirty(labelTable)
+	t.dirty.MarkDirty(eventTable)
+	if !isWisp {
+		for _, tbl := range []string{"comments", "child_counters", "issue_snapshots", "compaction_snapshots"} {
+			t.dirty.MarkDirty(tbl)
+		}
+	}
 	return nil
 }
 
@@ -742,19 +756,16 @@ func (t *doltTransaction) RemoveDependency(ctx context.Context, issueID, depends
 
 // AddLabel adds a label within the transaction
 func (t *doltTransaction) AddLabel(ctx context.Context, issueID, label, actor string) error {
-	table := "labels"
-	if t.isActiveWisp(ctx, issueID) {
-		table = "wisp_labels"
+	isWisp := t.isActiveWisp(ctx, issueID)
+	_, labelTable, eventTable, _ := issueops.WispTableRouting(isWisp)
+	// Use the event-recording helper so label_added events reach the audit log,
+	// matching DoltStore.AddLabel (GH#3803).
+	if err := issueops.AddLabelInTx(ctx, t.txFor(labelTable), labelTable, eventTable, issueID, label, actor); err != nil {
+		return wrapExecError("add label in tx", err)
 	}
-
-	//nolint:gosec // G201: table is hardcoded
-	_, err := t.txFor(table).ExecContext(ctx, fmt.Sprintf(`
-		INSERT IGNORE INTO %s (issue_id, label) VALUES (?, ?)
-	`, table), issueID, label)
-	if err == nil {
-		t.dirty.MarkDirty(table)
-	}
-	return wrapExecError("add label in tx", err)
+	t.dirty.MarkDirty(labelTable)
+	t.dirty.MarkDirty(eventTable)
+	return nil
 }
 
 func (t *doltTransaction) GetLabels(ctx context.Context, issueID string) ([]string, error) {
@@ -782,19 +793,16 @@ func (t *doltTransaction) GetLabels(ctx context.Context, issueID string) ([]stri
 
 // RemoveLabel removes a label within the transaction
 func (t *doltTransaction) RemoveLabel(ctx context.Context, issueID, label, actor string) error {
-	table := "labels"
-	if t.isActiveWisp(ctx, issueID) {
-		table = "wisp_labels"
+	isWisp := t.isActiveWisp(ctx, issueID)
+	_, labelTable, eventTable, _ := issueops.WispTableRouting(isWisp)
+	// Use the event-recording helper so label_removed events reach the audit
+	// log, matching DoltStore.RemoveLabel (GH#3803).
+	if err := issueops.RemoveLabelInTx(ctx, t.txFor(labelTable), labelTable, eventTable, issueID, label, actor); err != nil {
+		return wrapExecError("remove label in tx", err)
 	}
-
-	//nolint:gosec // G201: table is hardcoded
-	_, err := t.txFor(table).ExecContext(ctx, fmt.Sprintf(`
-		DELETE FROM %s WHERE issue_id = ? AND label = ?
-	`, table), issueID, label)
-	if err == nil {
-		t.dirty.MarkDirty(table)
-	}
-	return wrapExecError("remove label in tx", err)
+	t.dirty.MarkDirty(labelTable)
+	t.dirty.MarkDirty(eventTable)
+	return nil
 }
 
 // SetConfig sets a config value within the transaction

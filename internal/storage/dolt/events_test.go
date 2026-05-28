@@ -1,9 +1,11 @@
 package dolt
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -91,5 +93,332 @@ func TestGetAllEventsSince_EmptyStore(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Errorf("expected 0 events from empty store, got %d", len(events))
+	}
+}
+
+// TestCloseIssue_EmitsEvent verifies that CloseIssue writes an event row so
+// audit consumers see the close operation. Regression guard for the parity gap
+// where the dolt path did a raw UPDATE without calling CloseIssueInTx.
+func TestCloseIssue_EmitsEvent(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	issue := &types.Issue{
+		ID:        "ev-close-1",
+		Title:     "Issue to close",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	if err := store.CloseIssue(ctx, issue.ID, "all done", "tester", "sess-abc"); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	events, err := store.GetEvents(ctx, issue.ID, 10)
+	if err != nil {
+		t.Fatalf("GetEvents: %v", err)
+	}
+
+	var found bool
+	for _, e := range events {
+		if e.EventType == types.EventClosed {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'closed' event after CloseIssue, got %d events: %v", len(events), events)
+	}
+}
+
+// TestAddLabel_EmitsEvent verifies that AddLabel writes a label_added event.
+// Regression guard for the dolt path that used raw INSERT IGNORE with no event emission.
+func TestAddLabel_EmitsEvent(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	issue := &types.Issue{
+		ID:        "ev-label-add-1",
+		Title:     "Issue for label event test",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	if err := store.AddLabel(ctx, issue.ID, "bug", "tester"); err != nil {
+		t.Fatalf("AddLabel: %v", err)
+	}
+
+	events, err := store.GetEvents(ctx, issue.ID, 10)
+	if err != nil {
+		t.Fatalf("GetEvents: %v", err)
+	}
+
+	var found bool
+	for _, e := range events {
+		if e.EventType == types.EventLabelAdded {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'label_added' event after AddLabel, got %d events: %v", len(events), events)
+	}
+}
+
+// TestRemoveLabel_EmitsEvent verifies that RemoveLabel writes a label_removed event.
+// Regression guard for the dolt path that used raw DELETE with no event emission.
+func TestRemoveLabel_EmitsEvent(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	issue := &types.Issue{
+		ID:        "ev-label-rm-1",
+		Title:     "Issue for label remove event test",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	if err := store.AddLabel(ctx, issue.ID, "urgent", "tester"); err != nil {
+		t.Fatalf("AddLabel: %v", err)
+	}
+
+	if err := store.RemoveLabel(ctx, issue.ID, "urgent", "tester"); err != nil {
+		t.Fatalf("RemoveLabel: %v", err)
+	}
+
+	events, err := store.GetEvents(ctx, issue.ID, 10)
+	if err != nil {
+		t.Fatalf("GetEvents: %v", err)
+	}
+
+	var found bool
+	for _, e := range events {
+		if e.EventType == types.EventLabelRemoved {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'label_removed' event after RemoveLabel, got %d events: %v", len(events), events)
+	}
+}
+
+// TestCloseIssueInTransaction_EmitsEvent verifies that closing an issue via the
+// transaction path (RunInTransaction → tx.CloseIssue) writes an event row.
+// This exercises the actually-broken path: callers like bd batch (cmd/bd/batch.go:332)
+// and bd mol squash hit doltTransaction.CloseIssue, which on pre-fix main did a
+// raw UPDATE with no event insert. The Storage.CloseIssue path was already correct,
+// so the non-transactional test above does not catch this regression.
+func TestCloseIssueInTransaction_EmitsEvent(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	issue := &types.Issue{
+		ID:        "ev-tx-close-1",
+		Title:     "Issue to close in tx",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	err := store.RunInTransaction(ctx, "test: close in tx", func(tx storage.Transaction) error {
+		return tx.CloseIssue(ctx, issue.ID, "all done", "tester", "sess-abc")
+	})
+	if err != nil {
+		t.Fatalf("RunInTransaction/CloseIssue: %v", err)
+	}
+
+	events, err := store.GetEvents(ctx, issue.ID, 10)
+	if err != nil {
+		t.Fatalf("GetEvents: %v", err)
+	}
+
+	var found bool
+	for _, e := range events {
+		if e.EventType == types.EventClosed {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'closed' event after tx.CloseIssue, got %d events: %v", len(events), events)
+	}
+}
+
+// TestAddLabelInTransaction_EmitsEvent verifies that adding a label via the
+// transaction path (RunInTransaction → tx.AddLabel) writes a label_added event.
+// Callers include bd label add (cmd/bd/label.go:106), bd cook (cook.go:869),
+// bd graph apply (graph_apply.go:240), bd mol bond (mol_bond.go:313), and the
+// tracker engine's external-tracker pull (engine.go:732). On pre-fix main the
+// dolt path used raw INSERT IGNORE with no event emission.
+func TestAddLabelInTransaction_EmitsEvent(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	issue := &types.Issue{
+		ID:        "ev-tx-label-add-1",
+		Title:     "Issue for tx label add event test",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	err := store.RunInTransaction(ctx, "test: add label in tx", func(tx storage.Transaction) error {
+		return tx.AddLabel(ctx, issue.ID, "bug", "tester")
+	})
+	if err != nil {
+		t.Fatalf("RunInTransaction/AddLabel: %v", err)
+	}
+
+	events, err := store.GetEvents(ctx, issue.ID, 10)
+	if err != nil {
+		t.Fatalf("GetEvents: %v", err)
+	}
+
+	var found bool
+	for _, e := range events {
+		if e.EventType == types.EventLabelAdded {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'label_added' event after tx.AddLabel, got %d events: %v", len(events), events)
+	}
+}
+
+// TestRemoveLabelInTransaction_EmitsEvent verifies that removing a label via the
+// transaction path (RunInTransaction → tx.RemoveLabel) writes a label_removed event.
+// Same caller surface as AddLabel above (bd label remove, tracker engine pull, etc).
+// On pre-fix main the dolt path used raw DELETE with no event emission.
+func TestRemoveLabelInTransaction_EmitsEvent(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	issue := &types.Issue{
+		ID:        "ev-tx-label-rm-1",
+		Title:     "Issue for tx label remove event test",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	if err := store.AddLabel(ctx, issue.ID, "urgent", "tester"); err != nil {
+		t.Fatalf("AddLabel: %v", err)
+	}
+
+	err := store.RunInTransaction(ctx, "test: remove label in tx", func(tx storage.Transaction) error {
+		return tx.RemoveLabel(ctx, issue.ID, "urgent", "tester")
+	})
+	if err != nil {
+		t.Fatalf("RunInTransaction/RemoveLabel: %v", err)
+	}
+
+	events, err := store.GetEvents(ctx, issue.ID, 10)
+	if err != nil {
+		t.Fatalf("GetEvents: %v", err)
+	}
+
+	var found bool
+	for _, e := range events {
+		if e.EventType == types.EventLabelRemoved {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'label_removed' event after tx.RemoveLabel, got %d events: %v", len(events), events)
+	}
+}
+
+// TestDeleteIssue_CascadesRelatedTables verifies that DeleteIssue via
+// RunInTransaction delegates to issueops.DeleteIssueInTx, which cascades to
+// related tables (labels, events, comments, dependencies). Regression guard
+// for the parity gap where the dolt path did a raw DELETE with no cascade,
+// mirroring the embedded path at internal/storage/embeddeddolt/transaction.go:78-84.
+func TestDeleteIssue_CascadesRelatedTables(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	issue := &types.Issue{
+		ID:        "ev-delete-1",
+		Title:     "Issue to delete",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	// Add a label so we can verify cascade cleanup happened
+	if err := store.AddLabel(ctx, issue.ID, "to-delete", "tester"); err != nil {
+		t.Fatalf("AddLabel: %v", err)
+	}
+
+	// Delete via transaction — exercises doltTransaction.DeleteIssue
+	err := store.RunInTransaction(ctx, "test: delete issue", func(tx storage.Transaction) error {
+		return tx.DeleteIssue(ctx, issue.ID)
+	})
+	if err != nil {
+		t.Fatalf("RunInTransaction/DeleteIssue: %v", err)
+	}
+
+	// Issue must be gone
+	_, getErr := store.GetIssue(ctx, issue.ID)
+	if !errors.Is(getErr, storage.ErrNotFound) {
+		t.Errorf("expected ErrNotFound after DeleteIssue, got %v", getErr)
+	}
+
+	// Labels must be cascade-cleaned — the raw-SQL path only deleted from issues,
+	// leaving label rows orphaned. Delegation to DeleteIssueInTx removes them.
+	labels, err := store.GetLabels(ctx, issue.ID)
+	if err != nil {
+		t.Fatalf("GetLabels after delete: %v", err)
+	}
+	if len(labels) != 0 {
+		t.Errorf("expected no labels after DeleteIssue, got %v (cascade did not run)", labels)
 	}
 }
