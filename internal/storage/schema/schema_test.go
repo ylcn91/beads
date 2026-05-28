@@ -197,6 +197,11 @@ func TestMigration0047HandlesLegacyWispDependenciesShape(t *testing.T) {
 		"ALTER TABLE wisp_dependencies ADD COLUMN depends_on_id VARCHAR(255) AS",
 		"cd.depends_on_issue_id",
 		"d.depends_on_wisp_id",
+		// GH#4176: the is_blocked recompute joins the dolt-ignored wisps table,
+		// which a freshly cloned server DB has not materialized yet. It must be
+		// guarded on the table existing or the migration crashes with
+		// "table not found: wisps".
+		"@wisps_exists",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("0047 migration missing legacy wisp_dependencies compatibility marker %q", want)
