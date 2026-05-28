@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"testing"
 
 	"github.com/steveyegge/beads/internal/hooks"
@@ -14,20 +13,6 @@ import (
 // nil — the chain composition tests must not trigger any of them.
 type stubChainStore struct {
 	storage.DoltStorage
-}
-
-// clearTelemetryEnv unsets every BD_OTEL_* variable telemetry.Enabled
-// inspects, so each test starts from a known baseline.
-func clearTelemetryEnv(t *testing.T) {
-	t.Helper()
-	for _, k := range []string{
-		"BD_OTEL_METRICS_URL",
-		"BD_OTEL_LOGS_URL",
-		"BD_OTEL_STDOUT",
-	} {
-		t.Setenv(k, "")
-		_ = os.Unsetenv(k)
-	}
 }
 
 func TestWireStorageDecorators_NilStorePassesThrough(t *testing.T) {
