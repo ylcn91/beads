@@ -31,6 +31,10 @@ func registerCommonIssueFlags(cmd *cobra.Command) {
 	cmd.Flags().String("acceptance", "", "Acceptance criteria")
 	cmd.Flags().String("notes", "", "Additional notes")
 	cmd.Flags().String("append-notes", "", "Append to existing notes (with newline separator)")
+	cmd.Flags().String("notes-file", "", "Read notes from file (use - for stdin)")
+	cmd.Flags().String("append-notes-file", "", "Read append-notes from file (use - for stdin)")
+	cmd.MarkFlagsMutuallyExclusive("notes", "notes-file")
+	cmd.MarkFlagsMutuallyExclusive("append-notes", "append-notes-file")
 	cmd.Flags().String("external-ref", "", "External reference (e.g., 'gh-9', 'jira-ABC', Linear URL)")
 }
 
@@ -190,6 +194,42 @@ func getDesignFlag(cmd *cobra.Command) (string, bool) {
 		return v, true
 	}
 
+	return "", false
+}
+
+// getNotesFlag retrieves the notes value from --notes-file or --notes.
+// The file variant takes precedence (use - for stdin), mirroring getDesignFlag.
+func getNotesFlag(cmd *cobra.Command) (string, bool) {
+	if cmd.Flags().Changed("notes-file") {
+		path, _ := cmd.Flags().GetString("notes-file")
+		content, err := readBodyFile(path)
+		if err != nil {
+			FatalError("reading notes file: %v", err)
+		}
+		return content, true
+	}
+	if cmd.Flags().Changed("notes") {
+		v, _ := cmd.Flags().GetString("notes")
+		return v, true
+	}
+	return "", false
+}
+
+// getAppendNotesFlag retrieves the append-notes value from --append-notes-file
+// or --append-notes. The file variant takes precedence (use - for stdin).
+func getAppendNotesFlag(cmd *cobra.Command) (string, bool) {
+	if cmd.Flags().Changed("append-notes-file") {
+		path, _ := cmd.Flags().GetString("append-notes-file")
+		content, err := readBodyFile(path)
+		if err != nil {
+			FatalError("reading append-notes file: %v", err)
+		}
+		return content, true
+	}
+	if cmd.Flags().Changed("append-notes") {
+		v, _ := cmd.Flags().GetString("append-notes")
+		return v, true
+	}
 	return "", false
 }
 

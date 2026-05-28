@@ -105,16 +105,16 @@ create, update, show, or close operation).`,
 		if designChanged {
 			updates["design"] = design
 		}
-		if cmd.Flags().Changed("notes") && cmd.Flags().Changed("append-notes") {
-			FatalErrorRespectJSON("cannot specify both --notes and --append-notes")
+		notesVal, notesChanged := getNotesFlag(cmd)
+		appendNotesVal, appendNotesChanged := getAppendNotesFlag(cmd)
+		if notesChanged && appendNotesChanged {
+			FatalErrorRespectJSON("cannot specify both --notes/--notes-file and --append-notes/--append-notes-file")
 		}
-		if cmd.Flags().Changed("notes") {
-			notes, _ := cmd.Flags().GetString("notes")
-			updates["notes"] = notes
+		if notesChanged {
+			updates["notes"] = notesVal
 		}
-		if cmd.Flags().Changed("append-notes") {
-			appendNotes, _ := cmd.Flags().GetString("append-notes")
-			updates["append_notes"] = appendNotes
+		if appendNotesChanged {
+			updates["append_notes"] = appendNotesVal
 		}
 		if cmd.Flags().Changed("acceptance") || cmd.Flags().Changed("acceptance-criteria") {
 			var acceptanceCriteria string
