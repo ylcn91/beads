@@ -9,7 +9,7 @@ sidebar_position: 0
 <!-- AUTO-GENERATED: do not edit manually -->
 Reference for bd v1.0.4. Generated from `bd help --list` and `bd help --doc <command>`.
 
-This reference covers all 106 live top-level `bd` commands. Regenerate it with:
+This reference covers all 107 live top-level `bd` commands. Regenerate it with:
 
 ```bash
 ./scripts/generate-cli-docs.sh
@@ -116,6 +116,7 @@ This reference covers all 106 live top-level `bd` commands. Regenerate it with:
 - [`bd tag`](./tag.md)
 - [`bd todo`](./todo.md)
 - [`bd types`](./types.md)
+- [`bd unclaim`](./unclaim.md)
 - [`bd undefer`](./undefer.md)
 - [`bd update`](./update.md)
 - [`bd upgrade`](./upgrade.md)

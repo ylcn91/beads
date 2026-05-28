@@ -54,6 +54,7 @@ Reference for bd Latest. Generated from `bd help --all`.
   - [bd todo add](#bd-todo-add) — Add a new TODO item
   - [bd todo done](#bd-todo-done) — Mark TODO(s) as done
   - [bd todo list](#bd-todo-list) — List TODO items
+- [bd unclaim](#bd-unclaim) — Release a claimed issue
 - [bd update](#bd-update) — Update one or more issues
 
 ### Views & Reports:
@@ -102,7 +103,12 @@ Reference for bd Latest. Generated from `bd help --all`.
   - [bd backup sync](#bd-backup-sync) — Push database to configured Dolt backup
 - [bd branch](#bd-branch) — List or create branches
 - [bd export](#bd-export) — Export issues to JSONL format
-- [bd federation](#bd-federation) — Manage peer-to-peer federation (requires CGO)
+- [bd federation](#bd-federation) — Manage peer-to-peer federation with other workspaces
+  - [bd federation add-peer](#bd-federation-add-peer) — Add a federation peer with optional SQL credentials
+  - [bd federation list-peers](#bd-federation-list-peers) — List configured federation peers
+  - [bd federation remove-peer](#bd-federation-remove-peer) — Remove a federation peer
+  - [bd federation status](#bd-federation-status) — Show federation sync status
+  - [bd federation sync](#bd-federation-sync) — Synchronize with a peer town
 - [bd import](#bd-import) — Import issues from a JSONL file or stdin into the database
 - [bd restore](#bd-restore) — Restore full history of a compacted issue from Dolt history
 - [bd vc](#bd-vc) — Version control operations
@@ -503,7 +509,7 @@ bd create [title] [flags]
       --spec-id string          Link to specification document
       --stdin                   Read description from stdin (alias for --body-file -)
       --title string            Issue title (alternative to positional argument)
-  -t, --type string             Issue type (bug|feature|task|epic|chore|decision); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision (default "task")
+  -t, --type string             Issue type (bug|feature|task|epic|chore|decision|spike|story|milestone); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision (default "task")
       --validate                Validate description contains required sections for issue type
       --waits-for string        Spawner issue ID to wait for (creates waits-for dependency for fanout gate)
       --waits-for-gate string   Gate type: all-children (wait for all) or any-children (wait for first) (default "all-children")
@@ -1440,6 +1446,28 @@ bd todo list [flags]
       --all   Show all TODOs including completed
 ```
 
+### bd unclaim
+
+Release a claimed issue by clearing the assignee and resetting status to 'open'.
+
+Use this when an agent crashes mid-work or you need to abandon a claimed task.
+The issue becomes available for re-claiming by other agents.
+
+Examples:
+  bd unclaim bd-123
+  bd unclaim bd-123 --reason "Agent crashed"
+  bd unclaim bd-123 bd-456
+
+```
+bd unclaim [id...] [flags]
+```
+
+**Flags:**
+
+```
+  -r, --reason string   Reason for unclaiming
+```
+
 ### bd update
 
 Update one or more issues.
@@ -1638,11 +1666,7 @@ Section requirements by type:
   task:     Acceptance Criteria
   feature:  Acceptance Criteria
   epic:     Success Criteria
-  decision: Decision, Rationale, Alternatives Considered
-  spike:    Goal, Findings
-  story:    Acceptance Criteria
   chore:    (none)
-  milestone: (none)
 
 Examples:
   bd lint                    # Lint all open issues
@@ -1660,7 +1684,7 @@ bd lint [issue-id...] [flags]
 
 ```
   -s, --status string   Filter by status (default: open, use 'all' for all)
-  -t, --type string     Filter by issue type (bug, task, feature, epic)
+  -t, --type string     Filter by issue type (bug, task, feature, epic, decision, spike, story, chore, milestone)
 ```
 
 ### bd stale
@@ -1751,16 +1775,23 @@ bd statuses
 
 List all valid issue types that can be used with bd create --type.
 
-Core work types (bug, task, feature, chore, epic, decision) are always valid.
+Core work types (bug, task, feature, chore, epic, decision, spike, story, milestone) are always valid.
 Additional types require configuration via types.custom in .beads/config.yaml.
 
 Examples:
   bd types              # List all types with descriptions
+  bd types --sections   # List required sections for each type
   bd types --json       # Output as JSON
 
 
 ```
-bd types
+bd types [flags]
+```
+
+**Flags:**
+
+```
+      --sections   Show required sections for each issue type
 ```
 
 ## Dependencies & Structure:
@@ -2383,17 +2414,114 @@ bd export [flags]
 
 ### bd federation
 
-Federation commands require CGO and the Dolt storage backend.
-
-This binary was built without CGO support. To use federation features:
-  1. Use pre-built binaries from GitHub releases, or
-  2. Build from source with CGO enabled
+Manage peer-to-peer federation between Dolt-backed beads databases.
 
 Federation enables synchronized issue tracking across multiple workspaces,
 each maintaining their own Dolt database while sharing updates via remotes.
 
+Requires the Dolt storage backend.
+
 ```
 bd federation
+```
+
+#### bd federation add-peer
+
+Add a new federation peer remote with optional SQL user authentication.
+
+The URL can be:
+  - dolthub://org/repo      DoltHub hosted repository
+  - host:port/database      Direct dolt sql-server connection
+  - file:///path/to/repo    Local file path (for testing)
+
+Credentials are encrypted and stored locally. They are used automatically
+when syncing with the peer. If --user is provided without --password,
+you will be prompted for the password interactively.
+
+Examples:
+  bd federation add-peer town-beta dolthub://acme/town-beta-beads
+  bd federation add-peer town-gamma 192.168.1.100:3306/beads --user sync-bot
+  bd federation add-peer partner https://partner.example.com/beads --user admin --password secret
+
+```
+bd federation add-peer <name> <url> [flags]
+```
+
+**Flags:**
+
+```
+  -p, --password string      SQL password (prompted if --user set without --password)
+      --sovereignty string   Sovereignty tier (T1, T2, T3, T4)
+  -u, --user string          SQL username for authentication
+```
+
+#### bd federation list-peers
+
+List configured federation peers
+
+```
+bd federation list-peers
+```
+
+#### bd federation remove-peer
+
+Remove a federation peer
+
+```
+bd federation remove-peer <name>
+```
+
+#### bd federation status
+
+Show synchronization status with peer towns.
+
+Displays:
+  - Configured peers and their URLs
+  - Commits ahead/behind each peer
+  - Whether there are unresolved conflicts
+
+Examples:
+  bd federation status                    # Status for all peers
+  bd federation status --peer town-beta   # Status for specific peer
+
+```
+bd federation status [--peer name] [flags]
+```
+
+**Flags:**
+
+```
+      --peer string   Specific peer to check
+```
+
+#### bd federation sync
+
+Pull from and push to peer towns.
+
+Without --peer, syncs with all configured peers.
+With --peer, syncs only with the specified peer.
+
+Handles merge conflicts using the configured strategy:
+  --strategy ours    Keep local changes on conflict
+  --strategy theirs  Accept remote changes on conflict
+
+If no strategy is specified and conflicts occur, the sync will pause
+and report which tables have conflicts for manual resolution.
+
+Examples:
+  bd federation sync                      # Sync with all peers
+  bd federation sync --peer town-beta     # Sync with specific peer
+  bd federation sync --strategy theirs    # Auto-resolve using remote values
+
+```
+bd federation sync [--peer name] [flags]
+```
+
+**Flags:**
+
+```
+      --peer string       Specific peer to sync with
+      --strategy string   Conflict resolution strategy (ours|theirs)
 ```
 
 ### bd import
@@ -6275,7 +6403,13 @@ Examples:
   bd mol ready --gated --json    # JSON output for automation
 
 ```
-bd mol ready --gated
+bd mol ready --gated [flags]
+```
+
+**Flags:**
+
+```
+      --gated   Find molecules ready for gate-resume dispatch (always on for this subcommand)
 ```
 
 #### bd mol seed

@@ -760,7 +760,8 @@ func (s *configStore) IterWisps(_ context.Context, _ types.WispFilter) (storage.
 	return storage.NewSliceIter[types.Issue](nil), nil
 }
 
-func (s *configStore) Close() error { return nil }
+func (s *configStore) Close() error                                             { return nil }
+func (s *configStore) UnclaimIssue(_ context.Context, _ string, _ string) error { return nil }
 
 func TestFetchIssuesIncludesPullJQLInQuery(t *testing.T) {
 	var capturedJQL string
