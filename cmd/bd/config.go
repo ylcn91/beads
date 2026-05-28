@@ -107,14 +107,11 @@ var configSetCmd = &cobra.Command{
 		// "issue_prefix" (underscore) — three divergent stores, write never
 		// visible.
 		if msg, rejected := rejectProtectedConfigKey(key); rejected {
-			fmt.Fprintln(os.Stderr, msg)
-			os.Exit(1)
+			FatalError("%s", msg)
 		}
 
 		if key == "dolt.debug" && !usesSQLServer() {
-			fmt.Fprintln(os.Stderr, "Error: dolt.debug requires a sql-server-backed project (embedded mode has no managed server).")
-			fmt.Fprintln(os.Stderr, "  To migrate: re-init with 'bd init --server' or 'bd init --shared-server'.")
-			os.Exit(1)
+			FatalErrorWithHint("dolt.debug requires a sql-server-backed project (embedded mode has no managed server).", "  To migrate: re-init with 'bd init --server' or 'bd init --shared-server'.")
 		}
 
 		// Warn on unrecognized config keys so typos don't silently become
@@ -134,8 +131,7 @@ var configSetCmd = &cobra.Command{
 		// API keys and tokens in git history.
 		if !forceGitTracked {
 			if err := config.CheckSecretKeyGitSafety(key); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
+				FatalError("%v", err)
 			}
 		}
 
@@ -144,8 +140,7 @@ var configSetCmd = &cobra.Command{
 		// before the database is opened. (GH#536)
 		if config.IsYamlOnlyKey(key) {
 			if err := config.SetYamlConfig(key, value); err != nil {
-				fmt.Fprintf(os.Stderr, "Error setting config: %v\n", err)
-				os.Exit(1)
+				FatalError("setting config: %v", err)
 			}
 
 			if jsonOutput {
@@ -166,13 +161,11 @@ var configSetCmd = &cobra.Command{
 		if key == "beads.role" {
 			validRoles := map[string]bool{"maintainer": true, "contributor": true}
 			if !validRoles[value] {
-				fmt.Fprintf(os.Stderr, "Error: invalid role %q (valid values: maintainer, contributor)\n", value)
-				os.Exit(1)
+				FatalError("invalid role %q (valid values: maintainer, contributor)", value)
 			}
 			cmd := exec.Command("git", "config", "beads.role", value) //nolint:gosec // value is validated against allowlist above
 			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error setting beads.role in git config: %v\n", err)
-				os.Exit(1)
+				FatalError("setting beads.role in git config: %v", err)
 			}
 			if jsonOutput {
 				outputJSON(map[string]interface{}{
@@ -188,8 +181,7 @@ var configSetCmd = &cobra.Command{
 
 		// Database-stored config requires direct mode
 		if err := ensureDirectMode("config set requires direct database access"); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			FatalError("%v", err)
 		}
 
 		ctx := rootCtx
@@ -197,14 +189,12 @@ var configSetCmd = &cobra.Command{
 		// Validate status.custom config before writing
 		if key == "status.custom" && value != "" {
 			if _, err := types.ParseCustomStatusConfig(value); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: invalid status.custom value: %v\n", err)
-				os.Exit(1)
+				FatalError("invalid status.custom value: %v", err)
 			}
 		}
 
 		if err := store.SetConfig(ctx, key, value); err != nil {
-			fmt.Fprintf(os.Stderr, "Error setting config: %v\n", err)
-			os.Exit(1)
+			FatalError("setting config: %v", err)
 		}
 		commandDidWrite.Store(true)
 
@@ -274,8 +264,7 @@ var configGetCmd = &cobra.Command{
 
 		// Database-stored config requires direct mode
 		if err := ensureDirectMode("config get requires direct database access"); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			FatalError("%v", err)
 		}
 
 		ctx := rootCtx
@@ -285,8 +274,7 @@ var configGetCmd = &cobra.Command{
 		value, err = store.GetConfig(ctx, key)
 
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting config: %v\n", err)
-			os.Exit(1)
+			FatalError("getting config: %v", err)
 		}
 
 		if jsonOutput {
@@ -310,15 +298,13 @@ var configListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// Config operations work in direct mode only
 		if err := ensureDirectMode("config list requires direct database access"); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			FatalError("%v", err)
 		}
 
 		ctx := rootCtx
 		config, err := store.GetAllConfig(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error listing config: %v\n", err)
-			os.Exit(1)
+			FatalError("listing config: %v", err)
 		}
 
 		if jsonOutput {
@@ -432,8 +418,7 @@ var configUnsetCmd = &cobra.Command{
 		// These must be removed from config.yaml, not the database. (GH#2727)
 		if config.IsYamlOnlyKey(key) {
 			if err := config.UnsetYamlConfig(key); err != nil {
-				fmt.Fprintf(os.Stderr, "Error unsetting config: %v\n", err)
-				os.Exit(1)
+				FatalError("unsetting config: %v", err)
 			}
 
 			if jsonOutput {
@@ -452,8 +437,7 @@ var configUnsetCmd = &cobra.Command{
 		if key == "beads.role" {
 			gitCmd := exec.Command("git", "config", "--unset", "beads.role")
 			if err := gitCmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error unsetting beads.role in git config: %v\n", err)
-				os.Exit(1)
+				FatalError("unsetting beads.role in git config: %v", err)
 			}
 			if jsonOutput {
 				outputJSON(map[string]interface{}{
@@ -468,14 +452,12 @@ var configUnsetCmd = &cobra.Command{
 
 		// Database-stored config requires direct mode
 		if err := ensureDirectMode("config unset requires direct database access"); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			FatalError("%v", err)
 		}
 
 		ctx := rootCtx
 		if err := store.DeleteConfig(ctx, key); err != nil {
-			fmt.Fprintf(os.Stderr, "Error deleting config: %v\n", err)
-			os.Exit(1)
+			FatalError("deleting config: %v", err)
 		}
 		commandDidWrite.Store(true)
 
@@ -665,8 +647,7 @@ Examples:
 		for _, arg := range args {
 			idx := strings.Index(arg, "=")
 			if idx <= 0 {
-				fmt.Fprintf(os.Stderr, "Error: invalid argument %q (expected key=value format)\n", arg)
-				os.Exit(1)
+				FatalError("invalid argument %q (expected key=value format)", arg)
 			}
 			pairs = append(pairs, kvPair{key: arg[:idx], value: arg[idx+1:]})
 		}
@@ -676,14 +657,12 @@ Examples:
 			if p.key == "beads.role" {
 				validRoles := map[string]bool{"maintainer": true, "contributor": true}
 				if !validRoles[p.value] {
-					fmt.Fprintf(os.Stderr, "Error: invalid role %q (valid values: maintainer, contributor)\n", p.value)
-					os.Exit(1)
+					FatalError("invalid role %q (valid values: maintainer, contributor)", p.value)
 				}
 			}
 			if p.key == "status.custom" && p.value != "" {
 				if _, err := types.ParseCustomStatusConfig(p.value); err != nil {
-					fmt.Fprintf(os.Stderr, "Error: invalid status.custom value: %v\n", err)
-					os.Exit(1)
+					FatalError("invalid status.custom value: %v", err)
 				}
 			}
 		}
@@ -704,8 +683,7 @@ Examples:
 		if !forceGitTracked {
 			for _, p := range yamlPairs {
 				if err := config.CheckSecretKeyGitSafety(p.key); err != nil {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-					os.Exit(1)
+					FatalError("%v", err)
 				}
 			}
 		}
@@ -713,8 +691,7 @@ Examples:
 		// Phase 4: Write yaml-only keys
 		for _, p := range yamlPairs {
 			if err := config.SetYamlConfig(p.key, p.value); err != nil {
-				fmt.Fprintf(os.Stderr, "Error setting config %s: %v\n", p.key, err)
-				os.Exit(1)
+				FatalError("setting config %s: %v", p.key, err)
 			}
 		}
 
@@ -722,23 +699,20 @@ Examples:
 		for _, p := range gitPairs {
 			cmd := exec.Command("git", "config", "beads.role", p.value) //nolint:gosec // value is validated against allowlist above
 			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error setting %s in git config: %v\n", p.key, err)
-				os.Exit(1)
+				FatalError("setting %s in git config: %v", p.key, err)
 			}
 		}
 
 		// Phase 6: Write DB keys in batch
 		if len(dbPairs) > 0 {
 			if err := ensureDirectMode("config set-many requires direct database access"); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
+				FatalError("%v", err)
 			}
 
 			ctx := rootCtx
 			for _, p := range dbPairs {
 				if err := store.SetConfig(ctx, p.key, p.value); err != nil {
-					fmt.Fprintf(os.Stderr, "Error setting config %s: %v\n", p.key, err)
-					os.Exit(1)
+					FatalError("setting config %s: %v", p.key, err)
 				}
 			}
 			commandDidWrite.Store(true)
@@ -816,7 +790,7 @@ func isRecognizedConfigKey(key string) bool {
 func rejectProtectedConfigKey(key string) (string, bool) {
 	switch key {
 	case "issue_prefix", "issue-prefix":
-		return "Error: issue_prefix cannot be set via 'bd config set'.\n" +
+		return "issue_prefix cannot be set via 'bd config set'.\n" +
 			"  - New project:       bd init --prefix <prefix>\n" +
 			"  - Fresh clone:       bd bootstrap\n" +
 			"  - Rename existing:   bd rename-prefix <new-prefix>", true
