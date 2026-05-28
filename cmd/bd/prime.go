@@ -27,6 +27,7 @@ var (
 	primeStealthMode  bool
 	primeExportMode   bool
 	primeMemoriesOnly bool
+	primeNoMemories   bool
 	primeHookJSONMode bool
 )
 
@@ -175,7 +176,7 @@ Config options:
 		// Output workflow context (adaptive based on MCP and stealth mode).
 		// Buffer first so we can wrap in the hook JSON envelope as a single field.
 		var buf bytes.Buffer
-		if err := outputPrimeContextWithOptions(&buf, mcpMode, stealthMode, primeMemoriesOnly); err != nil {
+		if err := outputPrimeContextWithOptions(&buf, mcpMode, stealthMode, primeMemoriesOnly, primeNoMemories); err != nil {
 			// Suppress all errors - silent exit with success.
 			// Never write to stderr (breaks Windows compatibility).
 			// Under --hook-json still emit the empty envelope so stdout
@@ -195,6 +196,8 @@ func init() {
 	primeCmd.Flags().BoolVar(&primeStealthMode, "stealth", false, "Stealth mode (no git operations, flush only)")
 	primeCmd.Flags().BoolVar(&primeExportMode, "export", false, "Output default content (ignores PRIME.md override)")
 	primeCmd.Flags().BoolVar(&primeMemoriesOnly, "memories-only", false, "Output only persistent memories for compact hook contexts")
+	primeCmd.Flags().BoolVar(&primeNoMemories, "no-memories", false, "Omit the persistent memories section from prime output")
+	primeCmd.MarkFlagsMutuallyExclusive("memories-only", "no-memories")
 	primeCmd.Flags().BoolVar(&primeHookJSONMode, "hook-json", false, "Wrap output in the SessionStart hook JSON envelope (Claude Code, Gemini CLI, Codex)")
 	rootCmd.AddCommand(primeCmd)
 }
@@ -309,17 +312,17 @@ func getRedirectNotice(verbose bool) string {
 
 // outputPrimeContext outputs workflow context in markdown format
 func outputPrimeContext(w io.Writer, mcpMode bool, stealthMode bool) error {
-	return outputPrimeContextWithOptions(w, mcpMode, stealthMode, false)
+	return outputPrimeContextWithOptions(w, mcpMode, stealthMode, false, false)
 }
 
-func outputPrimeContextWithOptions(w io.Writer, mcpMode bool, stealthMode bool, memoriesOnly bool) error {
+func outputPrimeContextWithOptions(w io.Writer, mcpMode bool, stealthMode bool, memoriesOnly bool, omitMemories bool) error {
 	if memoriesOnly {
 		return outputMemoriesOnlyContext(w)
 	}
 	if mcpMode {
-		return outputMCPContext(w, stealthMode)
+		return outputMCPContext(w, stealthMode, omitMemories)
 	}
-	return outputCLIContext(w, stealthMode)
+	return outputCLIContext(w, stealthMode, omitMemories)
 }
 
 const primeTruncationDirective = "[bd prime] If this output is truncated by your host, read the full persisted hook output before continuing; it may contain project memories and session rules not visible in the preview.\n\n"
@@ -457,7 +460,7 @@ func maybePullStaleLinearData(beadsDir string) {
 }
 
 // outputMCPContext outputs minimal context for MCP users
-func outputMCPContext(w io.Writer, stealthMode bool) error {
+func outputMCPContext(w io.Writer, stealthMode bool, omitMemories bool) error {
 	ephemeral := isEphemeralBranch()
 	noPush := config.GetBool("no-push")
 	localOnly := !primeHasGitRemote() || !primeHasSyncRemote()
@@ -475,7 +478,10 @@ func outputMCPContext(w io.Writer, stealthMode bool) error {
 	}
 
 	redirectNotice := getRedirectNotice(false)
-	memories := formatMemoriesForPrime(true)
+	var memories string
+	if !omitMemories {
+		memories = formatMemoriesForPrime(true)
+	}
 
 	context := primeTruncationDirective + `# Beads Issue Tracker Active
 
@@ -503,7 +509,7 @@ Start: Check ` + "`ready`" + ` tool for available work.
 }
 
 // outputCLIContext outputs full CLI reference for non-MCP users
-func outputCLIContext(w io.Writer, stealthMode bool) error {
+func outputCLIContext(w io.Writer, stealthMode bool, omitMemories bool) error {
 	ephemeral := isEphemeralBranch()
 	noPush := config.GetBool("no-push")
 	localOnly := !primeHasGitRemote() || !primeHasSyncRemote()
@@ -585,7 +591,10 @@ git push                    # Push to remote
 	}
 
 	redirectNotice := getRedirectNotice(true)
-	memories := formatMemoriesForPrime(false)
+	var memories string
+	if !omitMemories {
+		memories = formatMemoriesForPrime(false)
+	}
 
 	context := primeTruncationDirective + `# Beads Workflow Context
 

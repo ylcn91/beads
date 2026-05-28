@@ -194,7 +194,7 @@ func TestPrimeStartsWithTruncationDirective(t *testing.T) {
 
 func TestPrimeMemoriesOnlyNoMemories(t *testing.T) {
 	var buf bytes.Buffer
-	if err := outputPrimeContextWithOptions(&buf, false, false, true); err != nil {
+	if err := outputPrimeContextWithOptions(&buf, false, false, true, false); err != nil {
 		t.Fatalf("outputPrimeContextWithOptions failed: %v", err)
 	}
 
