@@ -1136,7 +1136,12 @@ func newServerMode(ctx context.Context, cfg *Config) (*DoltStore, error) {
 		}
 	}
 
-	if isLocalHost(cfg.ServerHost) && shouldPersistResolvedPortFile() {
+	// Read-only opens must not rewrite .beads/dolt-server.port: when a read
+	// command touches a gc-managed/shared server under a different SQL database
+	// name, EnsurePortFile would silently overwrite the standalone store's port,
+	// causing split-brain (GH#3926). Gate on !cfg.ReadOnly, mirroring the
+	// syncCLIRemotesToSQL guard below.
+	if !cfg.ReadOnly && isLocalHost(cfg.ServerHost) && shouldPersistResolvedPortFile() {
 		beadsDir := cfg.BeadsDir
 		if beadsDir == "" && cfg.Path != "" {
 			beadsDir = filepath.Dir(cfg.Path)
