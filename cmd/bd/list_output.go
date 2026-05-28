@@ -17,7 +17,7 @@ import (
 // for a complete one (GH#3212, GH#788). Suppressed in --json mode so
 // programmatic consumers see only the JSON payload (be-acnquj).
 func printTruncationHint(truncated bool, effectiveLimit int) {
-	if !truncated || effectiveLimit <= 0 || jsonOutput {
+	if !truncated || effectiveLimit <= 0 || jsonOutput || !ui.IsStderrTerminal() {
 		return
 	}
 	msg := fmt.Sprintf("\nShowing %d issues; more results matched but were hidden by --limit. Use --limit 0 for all, or --limit N to raise the cap.\n", effectiveLimit)
