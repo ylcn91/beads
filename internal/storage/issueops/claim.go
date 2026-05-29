@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage"
@@ -40,6 +41,11 @@ func ClaimIssueInTx(ctx context.Context, tx *sql.Tx, id string, actor string) (*
 
 	now := time.Now().UTC()
 
+	// Claimable statuses are "open" plus any custom open-equivalent statuses
+	// (CategoryActive), so projects with custom open-equivalent statuses can
+	// still claim work (gastownhall/beads#4164).
+	statusPlaceholders, statusArgs := claimableStatusClause(ctx, tx)
+
 	// Conditional UPDATE: only succeeds while the issue is still claimable.
 	// Also set started_at on first transition to in_progress (GH#2796); preserve
 	// any existing value so re-claims don't overwrite the original start time.
@@ -47,17 +53,21 @@ func ClaimIssueInTx(ctx context.Context, tx *sql.Tx, id string, actor string) (*
 		result sql.Result
 	)
 	if oldIssue.StartedAt == nil {
+		args := append([]interface{}{actor, now, now}, statusArgs...)
+		args = append(args, id, actor)
 		result, err = tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE %s
 			SET assignee = ?, status = 'in_progress', updated_at = ?, started_at = ?
-			WHERE id = ? AND status = 'open' AND (assignee = '' OR assignee IS NULL OR assignee = ?)
-		`, issueTable), actor, now, now, id, actor)
+			WHERE status IN (%s) AND id = ? AND (assignee = '' OR assignee IS NULL OR assignee = ?)
+		`, issueTable, statusPlaceholders), args...)
 	} else {
+		args := append([]interface{}{actor, now}, statusArgs...)
+		args = append(args, id, actor)
 		result, err = tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE %s
 			SET assignee = ?, status = 'in_progress', updated_at = ?
-			WHERE id = ? AND status = 'open' AND (assignee = '' OR assignee IS NULL OR assignee = ?)
-		`, issueTable), actor, now, id, actor)
+			WHERE status IN (%s) AND id = ? AND (assignee = '' OR assignee IS NULL OR assignee = ?)
+		`, issueTable, statusPlaceholders), args...)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim issue: %w", err)
@@ -109,6 +119,27 @@ func ClaimIssueInTx(ctx context.Context, tx *sql.Tx, id string, actor string) (*
 	}
 
 	return &ClaimResult{OldIssue: oldIssue, IsWisp: isWisp}, nil
+}
+
+// claimableStatusClause returns the "?" placeholders and bound arguments for
+// the set of statuses an issue may be in to be claimable: the built-in "open"
+// plus any custom open-equivalent statuses (CategoryActive). On resolution
+// failure it degrades to just "open" so claiming never hard-fails on a config
+// read error.
+func claimableStatusClause(ctx context.Context, tx *sql.Tx) (placeholders string, args []interface{}) {
+	args = []interface{}{string(types.StatusOpen)}
+	if custom, err := ResolveCustomStatusesDetailedInTx(ctx, tx); err == nil {
+		for _, s := range custom {
+			if s.Category == types.CategoryActive {
+				args = append(args, s.Name)
+			}
+		}
+	}
+	parts := make([]string, len(args))
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ", "), args
 }
 
 // ClaimReadyIssueInTx claims the first currently ready issue matching filter in
