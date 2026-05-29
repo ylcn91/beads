@@ -135,13 +135,30 @@ func (t *embeddedTransaction) GetDependencyRecords(ctx context.Context, issueID 
 }
 
 func (t *embeddedTransaction) AddLabel(ctx context.Context, issueID, label, actor string) error {
-	t.dirty.MarkDirty("labels")
-	return issueops.AddLabelInTx(ctx, t.tx, "", "", issueID, label, actor)
+	isWisp := issueops.IsActiveWispInTx(ctx, t.tx, issueID)
+	_, labelTable, eventTable, _ := issueops.WispTableRouting(isWisp)
+	// AddLabelInTx also INSERTs a label_added row into the event table, so mark
+	// both dirty — otherwise the event write is left unstaged in the working set
+	// and blocks the next dolt push/pull, matching DoltStore.AddLabel (GH#3850).
+	if err := issueops.AddLabelInTx(ctx, t.tx, labelTable, eventTable, issueID, label, actor); err != nil {
+		return err
+	}
+	t.dirty.MarkDirty(labelTable)
+	t.dirty.MarkDirty(eventTable)
+	return nil
 }
 
 func (t *embeddedTransaction) RemoveLabel(ctx context.Context, issueID, label, actor string) error {
-	t.dirty.MarkDirty("labels")
-	return issueops.RemoveLabelInTx(ctx, t.tx, "", "", issueID, label, actor)
+	isWisp := issueops.IsActiveWispInTx(ctx, t.tx, issueID)
+	_, labelTable, eventTable, _ := issueops.WispTableRouting(isWisp)
+	// RemoveLabelInTx also INSERTs a label_removed event row; mark the event
+	// table dirty too so it is staged (GH#3850).
+	if err := issueops.RemoveLabelInTx(ctx, t.tx, labelTable, eventTable, issueID, label, actor); err != nil {
+		return err
+	}
+	t.dirty.MarkDirty(labelTable)
+	t.dirty.MarkDirty(eventTable)
+	return nil
 }
 
 func (t *embeddedTransaction) GetLabels(ctx context.Context, issueID string) ([]string, error) {
