@@ -506,6 +506,15 @@ func ReadConfigPrefix(ctx context.Context, tx *sql.Tx) (string, error) {
 		underscoreYamlPrefix := strings.TrimSpace(config.GetString("issue_prefix"))
 		debug.Logf("Debug: missing config.issue_prefix in database (err=%v, db value=%q, yaml issue-prefix=%q, yaml issue_prefix=%q)\n",
 			err, configPrefix, yamlPrefix, underscoreYamlPrefix)
+		// Fall back to the prefix carried by .beads/config.yaml only when the DB
+		// value is genuinely empty. The DB value always wins when present (prefix
+		// identity guard) so we never stamp IDs under the wrong prefix.
+		if yamlPrefix == "" {
+			yamlPrefix = underscoreYamlPrefix
+		}
+		if yamlPrefix != "" {
+			return strings.TrimSuffix(yamlPrefix, "-"), nil
+		}
 		return "", fmt.Errorf("%w: issue_prefix config is missing (run 'bd init --prefix <prefix>' for a new project, or 'bd bootstrap' to clone an existing remote; if using config.yaml, use key 'issue-prefix', not 'issue_prefix')", storage.ErrNotInitialized)
 	} else if err != nil {
 		return "", fmt.Errorf("failed to get config: %w", err)
