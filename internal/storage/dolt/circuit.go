@@ -82,10 +82,21 @@ func maybeNewCircuitBreaker(host string, port int, database string) *circuitBrea
 	return newCircuitBreaker(host, port, database)
 }
 
-// circuitBreakerDir is the dedicated directory for circuit breaker state files.
-// Using a subdirectory avoids scanning all of /tmp (which may contain millions
-// of entries) when cleaning up stale breaker files on startup.
-const circuitBreakerDir = "/tmp/beads-circuit"
+// circuitBreakerDir returns the dedicated directory for circuit breaker state
+// files. Using a subdirectory avoids scanning all of /tmp (which may contain
+// millions of entries) when cleaning up stale breaker files on startup.
+//
+// The directory is per-user so that the breaker state files (written 0600) of
+// one user never block another user on a multi-user host. We previously used a
+// fixed shared path (/tmp/beads-circuit); the first user's 0600 files there
+// made the breaker fail closed for everyone else (GH#4223). Prefer
+// os.UserCacheDir; fall back to a per-uid subdir under TempDir.
+func circuitBreakerDir() string {
+	if cache, err := os.UserCacheDir(); err == nil && cache != "" {
+		return filepath.Join(cache, "beads-circuit")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("beads-circuit-%d", os.Getuid()))
+}
 
 // newCircuitBreaker creates a circuit breaker for the given Dolt server
 // host:port:database. The database name is included in the file path so each
@@ -107,12 +118,13 @@ func newCircuitBreaker(host string, port int, database string) *circuitBreaker {
 		filename = fmt.Sprintf("beads-dolt-circuit-%s-%d.json", safeHost, port)
 	}
 
-	_ = os.MkdirAll(circuitBreakerDir, 0755)
+	dir := circuitBreakerDir()
+	_ = os.MkdirAll(dir, 0755)
 	return &circuitBreaker{
 		host:     host,
 		port:     port,
 		database: database,
-		filePath: filepath.Join(circuitBreakerDir, filename),
+		filePath: filepath.Join(dir, filename),
 	}
 }
 
@@ -329,8 +341,9 @@ func CleanStaleCircuitBreakerFiles() {
 	_ = os.Remove("/tmp/beads-dolt-circuit-0.json")
 
 	// Clean stale files in the dedicated subdirectory (fast — typically 0-2 files).
-	_ = os.MkdirAll(circuitBreakerDir, 0755)
-	cleanStaleCircuitBreakerFilesIn(circuitBreakerDir)
+	dir := circuitBreakerDir()
+	_ = os.MkdirAll(dir, 0755)
+	cleanStaleCircuitBreakerFilesIn(dir)
 }
 
 // cleanStaleCircuitBreakerFilesIn is the testable implementation of

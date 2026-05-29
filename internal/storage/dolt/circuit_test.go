@@ -417,9 +417,9 @@ func TestCircuitBreakerDir_UsesSubdirectory(t *testing.T) {
 	cb := newCircuitBreaker("127.0.0.1", 44444, "")
 	t.Cleanup(func() { os.Remove(cb.filePath) })
 
-	if filepath.Dir(cb.filePath) != filepath.Clean(circuitBreakerDir) {
+	if filepath.Dir(cb.filePath) != filepath.Clean(circuitBreakerDir()) {
 		t.Errorf("circuit breaker file should be in %s, got dir %s",
-			circuitBreakerDir, filepath.Dir(cb.filePath))
+			circuitBreakerDir(), filepath.Dir(cb.filePath))
 	}
 
 	// Write state and verify file lands in the subdirectory
