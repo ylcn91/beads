@@ -713,6 +713,12 @@ func TestPrintTruncationHintJSONSuppression(t *testing.T) {
 	origStderr := os.Stderr
 	t.Cleanup(func() { os.Stderr = origStderr })
 
+	// Force terminal detection so the human-mode cases exercise the emit path;
+	// the test captures stderr through a pipe, which is not itself a TTY.
+	prevTerm := stderrIsTerminal
+	stderrIsTerminal = func() bool { return true }
+	t.Cleanup(func() { stderrIsTerminal = prevTerm })
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r, w, err := os.Pipe()
