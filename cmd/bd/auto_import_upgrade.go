@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
@@ -52,10 +55,19 @@ var fallbackImporter = importFromLocalJSONLConflictSkip
 // prevent the store from being used.
 func maybeAutoImportJSONL(ctx context.Context, s storage.DoltStorage, beadsDir string) {
 	// Quick check: does the JSONL file exist and have content?
-	jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
+	jsonlPath := configuredImportJSONLPath(beadsDir)
 	info, err := os.Stat(jsonlPath)
 	if err != nil || info.Size() == 0 {
 		return // no JSONL file or empty — nothing to import
+	}
+
+	// Skip if we already attempted to import this exact content. The stamp
+	// records the source hash of the last attempt (success or failure), so an
+	// unchanged file is not re-imported on every command; a changed file
+	// produces a new hash and re-imports.
+	fingerprint, ferr := hashJSONLContent(jsonlPath)
+	if ferr == nil && importStampMatches(beadsDir, fingerprint) {
+		return
 	}
 
 	// Top-level emptiness guard (covers both embedded and fallback paths).
@@ -88,6 +100,9 @@ func maybeAutoImportJSONL(ctx context.Context, s storage.DoltStorage, beadsDir s
 	// DOLT_COMMIT races with concurrent writers.
 	if importer, ok := s.(jsonlImporter); ok {
 		imported, err := importer.ImportJSONLData(ctx, issues, configEntries, "auto-import")
+		if ferr == nil {
+			writeImportStamp(beadsDir, fingerprint)
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: auto-import from %s failed: %v\n", jsonlPath, err)
 			fmt.Fprintf(os.Stderr, "\nYour issues are still safe in %s.\n", jsonlPath)
@@ -111,6 +126,9 @@ func maybeAutoImportJSONL(ctx context.Context, s storage.DoltStorage, beadsDir s
 	fmt.Fprintf(os.Stderr, "auto-importing %d bytes from %s into empty database...\n", info.Size(), jsonlPath)
 
 	result, err := fallbackImporter(ctx, s, jsonlPath)
+	if ferr == nil {
+		writeImportStamp(beadsDir, fingerprint)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: auto-import from %s failed: %v\n", jsonlPath, err)
 		fmt.Fprintf(os.Stderr, "\nYour issues are still safe in %s.\n", jsonlPath)
@@ -134,4 +152,36 @@ func maybeAutoImportJSONL(ctx context.Context, s storage.DoltStorage, beadsDir s
 	} else {
 		fmt.Fprintf(os.Stderr, "auto-imported %d issues from %s\n", result.Issues, jsonlPath)
 	}
+}
+
+// autoImportStampFile holds the content hash of the most recent auto-import
+// attempt, relative to beadsDir.
+const autoImportStampFile = ".auto-import.stamp"
+
+// hashJSONLContent returns a hex SHA-256 of the file's bytes, used to detect
+// whether the import source changed since the last attempt.
+func hashJSONLContent(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// importStampMatches reports whether beadsDir already holds a stamp equal to
+// fingerprint, i.e. an import of this exact content was already attempted.
+func importStampMatches(beadsDir, fingerprint string) bool {
+	got, err := os.ReadFile(filepath.Join(beadsDir, autoImportStampFile))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(got)) == fingerprint
+}
+
+// writeImportStamp records that an import of fingerprint was attempted so the
+// same unchanged source is not re-imported on every command. Best-effort: a
+// write failure only means the next command may retry the import.
+func writeImportStamp(beadsDir, fingerprint string) {
+	_ = os.WriteFile(filepath.Join(beadsDir, autoImportStampFile), []byte(fingerprint+"\n"), 0o600)
 }
