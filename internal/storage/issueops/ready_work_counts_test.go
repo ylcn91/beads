@@ -14,11 +14,15 @@ func TestGetReadyWorkWithCountsAppliesLimitToEachSourceQuery(t *testing.T) {
 	_, mock, tx := beginMockTx(t)
 	mock.ExpectQuery(`SELECT 1 FROM wisp_dependencies LIMIT 1`).
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
-	mock.ExpectQuery(`(?s)FROM issues i.*WHERE status IN \('open', 'in_progress'\).*ORDER BY priority ASC, created_at DESC, id ASC\s+LIMIT 3`).
+	mock.ExpectQuery(`SELECT name, category FROM custom_statuses`).
+		WillReturnRows(sqlmock.NewRows([]string{"name", "category"}).AddRow("review", string(types.CategoryWIP)))
+	mock.ExpectQuery(`(?s)FROM issues i.*WHERE status IN \(\?, \?\).*ORDER BY priority ASC, created_at DESC, id ASC\s+LIMIT 3`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`SELECT 1 FROM wisps LIMIT 1`).
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
-	mock.ExpectQuery(`(?s)FROM wisps i.*WHERE status IN \('open', 'in_progress'\).*ORDER BY priority ASC, created_at DESC, id ASC\s+LIMIT 3`).
+	mock.ExpectQuery(`SELECT name, category FROM custom_statuses`).
+		WillReturnRows(sqlmock.NewRows([]string{"name", "category"}).AddRow("review", string(types.CategoryWIP)))
+	mock.ExpectQuery(`(?s)FROM wisps i.*WHERE status IN \(\?, \?\).*ORDER BY priority ASC, created_at DESC, id ASC\s+LIMIT 3`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	got, err := GetReadyWorkWithCountsInTx(context.Background(), tx, types.WorkFilter{

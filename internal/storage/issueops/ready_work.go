@@ -59,10 +59,28 @@ func buildReadyWorkOrder(policy types.SortPolicy) readyWorkOrder {
 
 func buildReadyWorkPredicates(ctx context.Context, tx *sql.Tx, filter types.WorkFilter, tables FilterTables) (*readyWorkPredicates, error) {
 	var statusClause string
+	var statusArgs []interface{}
 	if filter.Status != "" {
 		statusClause = "status = ?"
+		statusArgs = append(statusArgs, string(filter.Status))
 	} else {
-		statusClause = "status IN ('open', 'in_progress')"
+		// GH#3268: custom statuses in the "active" category are open-equivalent
+		// and must surface in ready work alongside the built-in open statuses.
+		// A resolver error means custom statuses are unavailable (degraded/
+		// pre-migration DB); fall back to the built-in set rather than failing
+		// ready work, mirroring GetCustomStatusesDetailed's degraded behavior.
+		readyStatuses := []string{string(types.StatusOpen), string(types.StatusInProgress)}
+		if customStatuses, err := ResolveCustomStatusesDetailedInTx(ctx, tx); err == nil {
+			for _, s := range types.CustomStatusesByCategory(customStatuses, types.CategoryActive) {
+				readyStatuses = append(readyStatuses, s.Name)
+			}
+		}
+		placeholders := make([]string, len(readyStatuses))
+		for i, s := range readyStatuses {
+			placeholders[i] = "?"
+			statusArgs = append(statusArgs, s)
+		}
+		statusClause = fmt.Sprintf("status IN (%s)", strings.Join(placeholders, ", "))
 	}
 	whereClauses := []string{
 		statusClause,
@@ -73,9 +91,7 @@ func buildReadyWorkPredicates(ctx context.Context, tx *sql.Tx, filter types.Work
 		whereClauses = append(whereClauses, "(ephemeral = 0 OR ephemeral IS NULL)")
 	}
 	var args []interface{}
-	if filter.Status != "" {
-		args = append(args, string(filter.Status))
-	}
+	args = append(args, statusArgs...)
 
 	if filter.Priority != nil {
 		whereClauses = append(whereClauses, "priority = ?")
