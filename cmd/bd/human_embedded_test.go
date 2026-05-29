@@ -60,6 +60,26 @@ func TestEmbeddedHuman(t *testing.T) {
 			t.Error("expected non-empty stats output")
 		}
 	})
+
+	// ===== Respond / Dismiss (GH#3596) =====
+	// "human" is in noDbCommands, so respond/dismiss must lazily activate the
+	// store; before the fix they failed with "storage is nil" in embedded mode.
+
+	t.Run("human_respond", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Needs human input", "--labels", "human")
+		out := bdHuman(t, bd, dir, "respond", issue.ID, "--response", "looks good")
+		if strings.Contains(out, "storage is nil") {
+			t.Fatalf("human respond hit nil store (GH#3596): %s", out)
+		}
+	})
+
+	t.Run("human_dismiss", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Dismiss me", "--labels", "human")
+		out := bdHuman(t, bd, dir, "dismiss", issue.ID, "--reason", "not needed")
+		if strings.Contains(out, "storage is nil") {
+			t.Fatalf("human dismiss hit nil store (GH#3596): %s", out)
+		}
+	})
 }
 
 // TestEmbeddedHumanConcurrent exercises human operations concurrently.

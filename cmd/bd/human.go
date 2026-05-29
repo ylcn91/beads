@@ -190,6 +190,12 @@ Examples:
 		ctx := rootCtx
 		issueID := args[0]
 
+		// "human" is in noDbCommands, so the store is not initialized eagerly;
+		// lazily activate it before any store access (GH#3596).
+		if err := ensureStoreActive(); err != nil {
+			FatalErrorRespectJSON("responding to human bead: %v", err)
+		}
+
 		// Resolve partial ID and get issue
 		result, err := resolveAndGetIssueWithRouting(ctx, store, issueID)
 		if err != nil {
@@ -261,6 +267,12 @@ Examples:
 
 		ctx := rootCtx
 		issueID := args[0]
+
+		// "human" is in noDbCommands, so the store is not initialized eagerly;
+		// lazily activate it before any store access (GH#3596).
+		if err := ensureStoreActive(); err != nil {
+			FatalErrorRespectJSON("dismissing human bead: %v", err)
+		}
 
 		// Resolve partial ID and get issue
 		result, err := resolveAndGetIssueWithRouting(ctx, store, issueID)
