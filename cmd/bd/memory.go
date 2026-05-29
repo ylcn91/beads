@@ -92,6 +92,7 @@ Examples:
 			FatalErrorRespectJSON("storing memory: %v", err)
 		}
 		commandDidWrite.Store(true)
+		commandDidTouchConfig.Store(true)
 
 		if jsonOutput {
 			outputJSON(map[string]string{
@@ -232,6 +233,7 @@ Examples:
 			FatalErrorRespectJSON("forgetting memory: %v", err)
 		}
 		commandDidWrite.Store(true)
+		commandDidTouchConfig.Store(true)
 
 		if jsonOutput {
 			outputJSON(map[string]string{

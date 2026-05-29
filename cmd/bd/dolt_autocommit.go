@@ -29,6 +29,10 @@ type doltAutoCommitParams struct {
 	IssueIDs []string
 	// MessageOverride, if non-empty, is used verbatim.
 	MessageOverride string
+	// IncludeConfig commits the config table too (GH#4078). Required for
+	// config-only writes (bd remember/forget, bd config set) since the default
+	// auto-commit path excludes config (GH#2455).
+	IncludeConfig bool
 }
 
 // maybeAutoCommit creates a Dolt commit after a successful write command when enabled.
@@ -40,6 +44,9 @@ type doltAutoCommitParams struct {
 //   - Uses Dolt's "commit all" behavior under the hood (DOLT_COMMIT -Am).
 //   - Treats "nothing to commit" as a no-op.
 func maybeAutoCommit(ctx context.Context, p doltAutoCommitParams) error {
+	// A command that intentionally touched config must commit it, even though
+	// the default auto-commit path excludes config (GH#2455, GH#4078).
+	p.IncludeConfig = p.IncludeConfig || commandDidTouchConfig.Load()
 	return maybeAutoCommitStore(ctx, getStore(), p)
 }
 
@@ -74,7 +81,13 @@ func maybeAutoCommitStore(ctx context.Context, st storage.DoltStorage, p doltAut
 		msg = formatDoltAutoCommitMessage(p.Command, getActor(), p.IssueIDs)
 	}
 
-	if err := st.Commit(ctx, msg); err != nil {
+	// Config-only writes are dropped by Commit (GH#2455 excludes config); route
+	// them through CommitWithConfig so they reach Dolt history (GH#4078).
+	commit := st.Commit
+	if p.IncludeConfig {
+		commit = st.CommitWithConfig
+	}
+	if err := commit(ctx, msg); err != nil {
 		if isDoltNothingToCommit(err) {
 			return nil
 		}

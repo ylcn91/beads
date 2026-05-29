@@ -94,6 +94,13 @@ var (
 	// Thread-safe via atomic.Bool to avoid data races in concurrent flush operations.
 	commandDidWrite atomic.Bool
 
+	// commandDidTouchConfig is set when a command intentionally writes the config
+	// table (bd remember/forget, bd config set/unset). Dolt auto-commit normally
+	// excludes config (GH#2455), so without this flag a config-only write in
+	// server mode is never committed and is lost on restart/pull (GH#4078). When
+	// set, the auto-commit includes config via CommitWithConfig.
+	commandDidTouchConfig atomic.Bool
+
 	// commandMayEmptyJSONLExport is set by destructive maintenance commands
 	// after they actually delete rows, allowing post-run auto-export to record
 	// an intentional empty JSONL artifact instead of treating it as ambiguous.
@@ -659,6 +666,7 @@ var rootCmd = &cobra.Command{
 
 		// Reset per-command write tracking (used by Dolt auto-commit).
 		commandDidWrite.Store(false)
+		commandDidTouchConfig.Store(false)
 		commandMayEmptyJSONLExport.Store(false)
 		commandDidExplicitDoltCommit = false
 		commandDidWriteTipMetadata = false

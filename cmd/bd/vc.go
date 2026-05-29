@@ -135,7 +135,9 @@ Examples:
 
 		// We are explicitly creating a Dolt commit; avoid redundant auto-commit in PersistentPostRun.
 		commandDidExplicitDoltCommit = true
-		if err := store.Commit(ctx, vcCommitMessage); err != nil {
+		// Explicit user commit includes config (GH#4078): Commit() excludes the
+		// config table (GH#2455), which would silently drop config-only changes.
+		if err := store.CommitWithConfig(ctx, vcCommitMessage); err != nil {
 			if isDoltNothingToCommit(err) {
 				if jsonOutput {
 					outputJSON(map[string]interface{}{"committed": false, "message": "nothing to commit"})

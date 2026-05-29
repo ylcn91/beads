@@ -197,6 +197,7 @@ var configSetCmd = &cobra.Command{
 			FatalError("setting config: %v", err)
 		}
 		commandDidWrite.Store(true)
+		commandDidTouchConfig.Store(true)
 
 		if jsonOutput {
 			outputJSON(map[string]string{
@@ -460,6 +461,7 @@ var configUnsetCmd = &cobra.Command{
 			FatalError("deleting config: %v", err)
 		}
 		commandDidWrite.Store(true)
+		commandDidTouchConfig.Store(true)
 
 		if jsonOutput {
 			outputJSON(map[string]string{
@@ -716,6 +718,7 @@ Examples:
 				}
 			}
 			commandDidWrite.Store(true)
+			commandDidTouchConfig.Store(true)
 		}
 
 		// Phase 7: Output results
