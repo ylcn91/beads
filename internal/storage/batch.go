@@ -22,11 +22,6 @@ type BatchCreateOptions struct {
 	OrphanHandling OrphanHandling
 	// SkipPrefixValidation skips prefix validation for existing IDs (used during import)
 	SkipPrefixValidation bool
-	// SkipDependencyValidationErrors skips dependency validation failures that
-	// legacy imports tolerated, such as cycles or self-dependencies.
-	SkipDependencyValidationErrors bool
-	// OnSkippedDependency records dependency edges skipped during batch create.
-	OnSkippedDependency func(issueID, dependsOnID, reason string)
 	// ConflictSkip makes batch creation insert-if-new instead of UPSERT: an
 	// issue whose ID already exists is left untouched rather than overwritten.
 	// Used only by the auto-import upgrade-recovery fallback (GH#3955), so
@@ -34,4 +29,9 @@ type BatchCreateOptions struct {
 	// again (cf. PR #3630), auto-import degrades to a harmless no-op instead
 	// of clobbering live rows. Explicit `bd import` keeps UPSERT semantics.
 	ConflictSkip bool
+	// SkipDependencyValidationErrors skips dependency validation failures that
+	// legacy imports tolerated, such as cycles or self-dependencies.
+	SkipDependencyValidationErrors bool
+	// OnSkippedDependency records dependency edges skipped during batch create.
+	OnSkippedDependency func(issueID, dependsOnID, reason string)
 }

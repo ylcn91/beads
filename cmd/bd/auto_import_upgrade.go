@@ -40,12 +40,13 @@ var fallbackImporter = importFromLocalJSONLConflictSkip
 // The top-level emptiness guard (GetStatistics) is the primary
 // protection for BOTH the embedded fast-path and the server-mode
 // fallback. Defense in depth backs each path up: the embedded
-// jsonlImporter has its own in-transaction emptiness check, and the
-// fallback path imports via importFromLocalJSONLConflictSkip, which is
-// insert-if-new rather than UPSERT (GH#3955). So if this guard ever
-// regresses again (cf. PR #3630), a stale issues.jsonl can no longer
-// be re-imposed on top of live Dolt rows — the worst case degrades to
-// a harmless no-op instead of clobbering recent writes.
+// jsonlImporter has its own in-transaction emptiness check (and is
+// also insert-if-new, GH#3955), and the fallback path imports via
+// importFromLocalJSONLConflictSkip, which is insert-if-new rather than
+// UPSERT. So if this guard ever regresses again (cf. PR #3630), a stale
+// issues.jsonl can no longer be re-imposed on top of live Dolt rows —
+// the worst case degrades to a harmless no-op instead of clobbering
+// recent writes.
 //
 // The function is best-effort: failures are logged as warnings but do not
 // prevent the store from being used.

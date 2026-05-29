@@ -98,26 +98,34 @@ func TestMaybeAutoImportJSONL_FallbackImporter_SkipsWhenNonEmpty(t *testing.T) {
 	}
 }
 
-// TestMaybeAutoImportJSONL_FallbackImporter_SkipsWhenConcurrentWriterWinsRace
-// models the #3948 hazard where a separate Dolt writer commits data while a bd
-// process with stale issues.jsonl is deciding whether auto-import should run.
+// TestMaybeAutoImportJSONL_FallbackImporter_SkipsWhenStatisticsReportNonEmptyLate
+// asserts the top-level emptiness guard still fires when GetStatistics returns
+// late (e.g. blocked on a busy store) rather than instantly. It is a timing
+// variant of SkipsWhenNonEmpty: GetStatistics ultimately reports a populated
+// store, so the fallback UPSERT path must not run.
 //
-// The fallback path is the important branch here: embedded stores have an
-// additional in-transaction guard, but fallbackImporter is an UPSERT path that
-// can re-impose stale JSONL over live rows if the top-level guard is removed.
-func TestMaybeAutoImportJSONL_FallbackImporter_SkipsWhenConcurrentWriterWinsRace(t *testing.T) {
+// Scope note — this does NOT cover the gastownhall/beads#3948 root cause. #3948
+// is the case where GetStatistics wrongly returns TotalIssues=0 on a populated
+// DB (a count/transaction-isolation defect), which defeats the guard entirely;
+// the dangerous fallback TOCTOU is empty-at-check -> concurrent writer commits
+// -> UPSERT clobbers the new rows. This test feeds a *correct* non-empty count,
+// so it exercises the happy path of the guard, not that hazard. The #3948 root
+// cause is tracked separately (mybd-w02o); maybeAutoImportJSONL makes a single
+// synchronous GetStatistics call, so there is no second observation point a
+// writer could race against at this layer.
+func TestMaybeAutoImportJSONL_FallbackImporter_SkipsWhenStatisticsReportNonEmptyLate(t *testing.T) {
 	dir := t.TempDir()
 	writeAutoImportFixtureJSONL(t, dir)
 	count := swapFallbackImporter(t, errors.New("test importer should not run"))
 
 	statsCalled := make(chan struct{})
-	writerCommitted := make(chan struct{})
+	statsUnblocked := make(chan struct{})
 
 	store := &fakeFallbackStore{
 		getStatistics: func(ctx context.Context) (*types.Statistics, error) {
 			close(statsCalled)
 			select {
-			case <-writerCommitted:
+			case <-statsUnblocked:
 				return &types.Statistics{TotalIssues: 1}, nil
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -140,9 +148,8 @@ func TestMaybeAutoImportJSONL_FallbackImporter_SkipsWhenConcurrentWriterWinsRace
 		t.Fatal("auto-import did not check store statistics before considering fallback import")
 	}
 
-	// Simulate a concurrent Dolt write becoming visible before auto-import's
-	// emptiness decision returns.
-	close(writerCommitted)
+	// Release the delayed GetStatistics so it reports a populated store.
+	close(statsUnblocked)
 
 	select {
 	case <-done:
@@ -151,7 +158,7 @@ func TestMaybeAutoImportJSONL_FallbackImporter_SkipsWhenConcurrentWriterWinsRace
 	}
 
 	if got := count.Load(); got != 0 {
-		t.Fatalf("regression: fallback importer was invoked %d time(s) after a concurrent writer populated the store; expected 0", got)
+		t.Fatalf("regression: fallback importer was invoked %d time(s) after statistics reported a non-empty store; expected 0", got)
 	}
 }
 
@@ -345,6 +352,13 @@ func (c *captureOptsStore) GetConfig(_ context.Context, _ string) (string, error
 
 func (c *captureOptsStore) SetConfig(_ context.Context, _, _ string) error {
 	return nil
+}
+
+// GetIssuesByIDs reports no existing rows so importIssuesCore's stale-import
+// filter (filterStaleImportIssues) is a no-op and the import proceeds to
+// CreateIssuesWithFullOptions, where the options under test are recorded.
+func (c *captureOptsStore) GetIssuesByIDs(_ context.Context, _ []string) ([]*types.Issue, error) {
+	return nil, nil
 }
 
 // TestImportIssuesCoreThreadsConflictSkip verifies the GH#3955 plumbing:
