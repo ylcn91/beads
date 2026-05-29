@@ -891,6 +891,9 @@ func GetDependentsWithMetadataInTx(ctx context.Context, tx *sql.Tx, issueID stri
 		rows, err := tx.QueryContext(ctx, fmt.Sprintf(
 			`SELECT issue_id, type FROM %s WHERE %s = ?`, depTable, DepTargetExpr), issueID)
 		if err != nil {
+			if optionalBlockedTable(depTable) && isTableNotExistError(err) {
+				continue
+			}
 			return nil, fmt.Errorf("get dependents from %s: %w", depTable, err)
 		}
 		for rows.Next() {
@@ -925,8 +928,16 @@ func GetDependentsWithMetadataInTx(ctx context.Context, tx *sql.Tx, issueID stri
 		issueMap[iss.ID] = iss
 	}
 
+	// Dedup by (depID, depType): a permanent dependencies row plus a stale
+	// dolt-ignored wisp_dependencies working-set row for the same child would
+	// otherwise double that child in the rendered tree and its rollup counts.
+	seen := make(map[depMeta]struct{}, len(deps))
 	var results []*types.IssueWithDependencyMetadata
 	for _, d := range deps {
+		if _, dup := seen[d]; dup {
+			continue
+		}
+		seen[d] = struct{}{}
 		issue, ok := issueMap[d.depID]
 		if !ok {
 			continue
