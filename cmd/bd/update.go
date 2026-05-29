@@ -11,12 +11,34 @@ import (
 	"github.com/steveyegge/beads/internal/audit"
 	"github.com/steveyegge/beads/internal/debug"
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/dberrors"
 	"github.com/steveyegge/beads/internal/timeparsing"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/ui"
 	"github.com/steveyegge/beads/internal/utils"
 	"github.com/steveyegge/beads/internal/validation"
 )
+
+// runWithConflictRetry runs op, retrying when it fails with a Dolt/MySQL
+// serialization conflict (1213/1205). RunInTransaction's own retry only covers
+// transient connection errors, so a read-modify-write caller that must not lose
+// a concurrent writer's data (e.g. --append-notes) retries the whole RMW here.
+// Such conflicts guarantee the transaction was rolled back, so each attempt
+// re-reads the latest committed state.
+func runWithConflictRetry(op func() error) error {
+	const maxAttempts = 5
+	delay := 25 * time.Millisecond
+	var err error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err = op()
+		if err == nil || !dberrors.IsSerializationConflict(err) {
+			return err
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+	return err
+}
 
 var updateCmd = &cobra.Command{
 	Use:     "update [id...]",
@@ -364,31 +386,41 @@ create, update, show, or close operation).`,
 				}
 				regularUpdates["metadata"] = merged
 			}
-			// Handle append_notes atomically: re-read the current notes inside a
-			// transaction so rapid concurrent appends don't clobber each other
-			// (GH#3964). Combining the pre-update issue.Notes snapshot taken above
-			// with the new text and writing it back is a lost-update race.
-			if appendNotes, ok := updates["append_notes"].(string); ok {
-				if err := issueStore.RunInTransaction(ctx, fmt.Sprintf("bd: append notes %s", result.ResolvedID), func(tx storage.Transaction) error {
-					cur, err := tx.GetIssue(ctx, result.ResolvedID)
-					if err != nil {
-						return err
-					}
-					combined := cur.Notes
-					if combined != "" {
-						combined += "\n"
-					}
-					combined += appendNotes
-					return tx.UpdateIssue(ctx, result.ResolvedID, map[string]interface{}{"notes": combined}, actor)
-				}); err != nil {
-					fmt.Fprintf(os.Stderr, "Error appending notes to %s: %v\n", id, err)
-					result.Close()
-					continue
+			// --append-notes is a read-modify-write: the combined value depends on
+			// the notes currently stored, not the pre-update issue.Notes snapshot
+			// taken above (combining against that stale snapshot loses data when
+			// two appends race). Re-read and combine inside the SAME transaction as
+			// the other field updates so the append is atomic with them — one Dolt
+			// commit, no partial application (GH#3964). RunInTransaction does not
+			// retry serialization conflicts, so retry the whole RMW here.
+			appendNotes, appendingNotes := updates["append_notes"].(string)
+			if len(regularUpdates) > 0 || appendingNotes {
+				var writeErr error
+				if appendingNotes {
+					writeErr = runWithConflictRetry(func() error {
+						return issueStore.RunInTransaction(ctx, fmt.Sprintf("bd: update %s", result.ResolvedID), func(tx storage.Transaction) error {
+							cur, err := tx.GetIssue(ctx, result.ResolvedID)
+							if err != nil {
+								return err
+							}
+							combined := cur.Notes
+							if combined != "" {
+								combined += "\n"
+							}
+							combined += appendNotes
+							txUpdates := make(map[string]interface{}, len(regularUpdates)+1)
+							for k, v := range regularUpdates {
+								txUpdates[k] = v
+							}
+							txUpdates["notes"] = combined
+							return tx.UpdateIssue(ctx, result.ResolvedID, txUpdates, actor)
+						})
+					})
+				} else {
+					writeErr = issueStore.UpdateIssue(ctx, result.ResolvedID, regularUpdates, actor)
 				}
-			}
-			if len(regularUpdates) > 0 {
-				if err := issueStore.UpdateIssue(ctx, result.ResolvedID, regularUpdates, actor); err != nil {
-					fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, err)
+				if writeErr != nil {
+					fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, writeErr)
 					result.Close()
 					continue
 				}

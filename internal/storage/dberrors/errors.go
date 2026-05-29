@@ -31,3 +31,19 @@ func IsTableNotExist(err error) bool {
 		quotedTableMissingPattern.MatchString(s) ||
 		unquotedTableMissingPattern.MatchString(s)
 }
+
+// IsSerializationConflict reports whether err is a MySQL/Dolt serialization
+// failure that guarantees the transaction was rolled back, so a read-modify-
+// write operation is safe to retry from scratch:
+//   - 1213 (ER_LOCK_DEADLOCK): concurrent transactions conflict at commit time
+//   - 1205 (ER_LOCK_WAIT_TIMEOUT): lock wait exceeded, transaction rolled back
+func IsSerializationConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	return mysqlErr.Number == 1213 || mysqlErr.Number == 1205
+}
