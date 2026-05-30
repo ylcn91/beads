@@ -57,7 +57,9 @@ func TestQuietFlagSuppressesSuccessOutput(t *testing.T) {
 	for _, line := range strings.Split(listStdout.String(), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, `"id"`) {
-			parts := strings.SplitN(line, `"`, 4)
+			// Split fully (not SplitN with cap 4): the value sits at parts[3]
+			// and a capped split would leave the trailing `",` glued to it.
+			parts := strings.Split(line, `"`)
 			if len(parts) >= 4 {
 				issueID = parts[3]
 			}
