@@ -1013,6 +1013,18 @@ func TestHasBeadsPlugin(t *testing.T) {
 			t.Error("expected no plugin detected")
 		}
 	})
+
+	t.Run("substring-only plugin name is not the beads plugin (GH#4244)", func(t *testing.T) {
+		env, _, _ := newClaudeTestEnv(t)
+		writeSettings(t, projectSettingsPath(env.projectDir), map[string]interface{}{
+			"enabledPlugins": map[string]interface{}{
+				"design-to-beads@xexr-marketplace": true,
+			},
+		})
+		if hasBeadsPlugin(env) {
+			t.Error("design-to-beads must not be detected as the beads hook plugin")
+		}
+	})
 }
 
 func TestInstallClaudeSkipsHooksWhenPluginPresent(t *testing.T) {

@@ -545,7 +545,15 @@ func checkBeadsPluginInFile(readFile func(string) ([]byte, error), path string) 
 		return false
 	}
 	for key, value := range enabledPlugins {
-		if strings.Contains(strings.ToLower(key), "beads") {
+		// enabledPlugins keys are "<pluginName>@<marketplace>". Match the
+		// plugin-name segment exactly so names that merely contain "beads"
+		// (e.g. "design-to-beads") are not mistaken for the beads hook
+		// plugin and don't suppress the SessionStart hook (GH#4244).
+		name := strings.ToLower(key)
+		if at := strings.IndexByte(name, '@'); at >= 0 {
+			name = name[:at]
+		}
+		if name == "beads" {
 			if enabled, ok := value.(bool); ok && enabled {
 				return true
 			}
