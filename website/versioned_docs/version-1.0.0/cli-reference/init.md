@@ -63,6 +63,7 @@ bd init [flags]
       --external                                       Server is externally managed (skip server startup); use with --shared-server or --server
       --force                                          Deprecated alias for --reinit-local. Bypasses only the LOCAL data-safety guard; does NOT authorize remote divergence (see 'bd help init-safety').
       --from-jsonl                                     Import issues from configured import.path; refuses remote history unless --discard-remote authorizes replacement
+      --init-if-missing                                Exit 0 (no-op) instead of failing when the workspace is already initialized; for idempotent orchestration
       --non-interactive                                Skip all interactive prompts (auto-detected in CI or non-TTY environments)
   -p, --prefix string                                  Issue prefix (default: current directory name)
       --proxied-server                                 [EXPERIMENTAL] Use a per-workspace proxied dolt sql-server (proxy + child dolt) rooted at .beads/proxieddb
@@ -80,6 +81,7 @@ bd init [flags]
   -q, --quiet                                          Suppress output (quiet mode)
       --reinit-local                                   Re-initialize local .beads/ over existing local data. Does NOT authorize remote divergence; see --discard-remote.
       --remote string                                  Dolt remote URL to clone from and persist as sync.remote
+      --repair                                         Repair an already-initialized workspace in place (fix .beads/ permissions) without reinitializing or touching issue data
       --role string                                    Set beads role without prompting: "maintainer" or "contributor"
       --server                                         Use external dolt sql-server instead of embedded engine
       --server-host string                             Dolt server host (default: 127.0.0.1)

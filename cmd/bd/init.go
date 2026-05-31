@@ -103,6 +103,12 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 			fmt.Fprintf(os.Stderr, "  See 'bd help init-safety' for the init flag surface.\n\n")
 			reinitLocal = true
 		}
+		// --repair: fix an already-initialized workspace in place (no
+		// reinitialization, no data touched) and exit (GH#3981).
+		if repair, _ := cmd.Flags().GetBool("repair"); repair {
+			runInitRepair()
+			return
+		}
 		sharedServer, _ := cmd.Flags().GetBool("shared-server")
 		externalServer, _ := cmd.Flags().GetBool("external")
 		debugMode, _ := cmd.Flags().GetBool("debug")
@@ -1684,6 +1690,7 @@ func init() {
 	initCmd.Flags().Bool("discard-remote", false, "Authorize discarding the configured remote's Dolt history when re-initializing. Requires --destroy-token in non-interactive mode; see 'bd help init-safety'.")
 	initCmd.Flags().Bool("from-jsonl", false, "Import issues from configured import.path; refuses remote history unless --discard-remote authorizes replacement")
 	initCmd.Flags().Bool("init-if-missing", false, "Exit 0 (no-op) instead of failing when the workspace is already initialized; for idempotent orchestration")
+	initCmd.Flags().Bool("repair", false, "Repair an already-initialized workspace in place (fix .beads/ permissions) without reinitializing or touching issue data")
 	initCmd.Flags().String("destroy-token", "", "Explicit confirmation token for destructive re-init in non-interactive mode (format: 'DESTROY-<prefix>')")
 	initCmd.Flags().String("agents-template", "", "Path to custom AGENTS.md template (overrides embedded default)")
 	initCmd.Flags().String("agents-profile", "", "AGENTS.md profile: 'minimal' (default, pointer to bd prime) or 'full' (complete command reference)")
@@ -1785,6 +1792,27 @@ func migrateOldDatabases(targetPath string, quiet bool) error {
 
 // checkExistingBeadsDataAt checks for existing database at a specific beadsDir path.
 // This is extracted to support both BEADS_DIR and CWD-based resolution.
+// runInitRepair fixes an already-initialized workspace in place (GH#3981):
+// it repairs .beads directory permissions without reinitializing or touching
+// issue data. Useful for workspaces created before permission hardening, or
+// whose perms drifted (e.g. a permissive umask) — cases bd init would
+// otherwise refuse to touch.
+func runInitRepair() {
+	beadsDir := beads.FindBeadsDir()
+	if beadsDir == "" {
+		FatalError("no beads workspace found to repair; run 'bd init' first")
+	}
+	fixed, err := config.FixBeadsDirPermissions(beadsDir)
+	if err != nil {
+		FatalError("repairing %s: %v", beadsDir, err)
+	}
+	if fixed {
+		fmt.Printf("Repaired permissions on %s (set to %04o).\n", beadsDir, config.BeadsDirPerm)
+	} else {
+		fmt.Printf("%s already healthy; nothing to repair.\n", beadsDir)
+	}
+}
+
 func checkExistingBeadsDataAt(beadsDir string, prefix string) error {
 	// Check if .beads directory exists
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {

@@ -107,6 +107,47 @@ func TestInitRepairsPermissiveBeadsDir(t *testing.T) {
 	}
 }
 
+// TestInitRepairFlagFixesPermissions is the regression test for GH#3981:
+// `bd init --repair` repairs an already-initialized workspace's .beads/
+// permissions in place, without reinitializing or needing a database.
+func TestInitRepairFlagFixesPermissions(t *testing.T) {
+	bdBin := buildBDForInitPermissionTests(t)
+
+	repoDir := newGitRepo(t)
+	beadsDir := filepath.Join(repoDir, ".beads")
+	if err := os.Mkdir(beadsDir, 0700); err != nil {
+		t.Fatalf("failed to create .beads: %v", err)
+	}
+	// Make it look like an initialized workspace so FindBeadsDir accepts it.
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(`{"backend":"dolt"}`), 0600); err != nil {
+		t.Fatalf("write metadata.json: %v", err)
+	}
+	// Drift the permissions to a permissive mode.
+	if err := os.Chmod(beadsDir, 0755); err != nil {
+		t.Fatalf("chmod .beads: %v", err)
+	}
+
+	cmd := exec.Command(bdBin, "init", "--repair")
+	cmd.Dir = repoDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("init --repair failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	info, err := os.Stat(beadsDir)
+	if err != nil {
+		t.Fatalf("Stat(.beads) after repair: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0700 {
+		t.Errorf(".beads permissions after init --repair = %04o, want 0700", perm)
+	}
+	if !strings.Contains(stdout.String(), "Repaired permissions") {
+		t.Errorf("expected repair confirmation on stdout, got:\n%s", stdout.String())
+	}
+}
+
 // TestInitPreservesSecureBeadsDir verifies that bd init does NOT touch a
 // .beads/ directory that already has secure permissions (0700).
 func TestInitPreservesSecureBeadsDir(t *testing.T) {
