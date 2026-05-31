@@ -47,6 +47,7 @@ bd list [flags]
       --label-regex string           Filter by label regex pattern (e.g., 'tech-(debt|legacy)')
   -n, --limit int                    Limit results (default 50, use 0 for unlimited) (default 50)
       --long                         Show detailed multi-line output for each issue
+      --max-rows int                 Hard upper bound on rows fetched from storage. Returns a non-zero exit (code 2) and an error to stderr if exceeded. 0 disables (the default). Overrides BEADS_MAX_ROWS for this invocation. Useful in CI/agent rigs that want a circuit breaker against pathological queries.
       --metadata-field stringArray   Filter by metadata field (key=value, repeatable)
       --mol-type string              Filter by molecule type: swarm, patrol, or work
       --no-assignee                  Filter issues with no assignee
@@ -67,7 +68,7 @@ bd list [flags]
       --skip-labels                  Skip label hydration. The labels field in output will be empty regardless of actual labels. Use only when the caller does not depend on label data. Cannot combine with --label, --label-any, --label-pattern, --label-regex, --exclude-label, or --no-labels.
       --sort string                  Sort by field: priority, created, updated, closed, status, id, title, type, assignee
       --spec string                  Filter by spec_id prefix
-  -s, --status string                Filter by stored status (open, in_progress, blocked, deferred, closed). Comma-separated for multiple: --status open,in_progress
+  -s, --status strings               Filter by stored status (open, in_progress, blocked, deferred, closed). Repeatable or comma-separated for multiple: -s open -s in_progress, or --status open,in_progress
       --title string                 Filter by title text (case-insensitive substring match)
       --title-contains string        Filter by title substring (case-insensitive)
       --tree                         Hierarchical tree format (default: true; use --flat to disable) (default true)

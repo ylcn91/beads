@@ -484,11 +484,15 @@ var listCmd = &cobra.Command{
 		return fmt.Errorf("bd list does not accept positional arguments; use flags instead (see bd list --help)")
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		status, _ := cmd.Flags().GetString("status")
+		// --status/-s is repeatable and comma-splitting (GH#3916): -s open -s
+		// in_progress and -s open,in_progress both yield ["open","in_progress"].
+		// Join back to the comma string the downstream logic already parses.
+		statusVals, _ := cmd.Flags().GetStringSlice("status")
 		// --state is alias for --status (desire path: bd-9h3w)
-		if status == "" {
-			status, _ = cmd.Flags().GetString("state")
+		if len(statusVals) == 0 {
+			statusVals, _ = cmd.Flags().GetStringSlice("state")
 		}
+		status := strings.Join(statusVals, ",")
 		assignee, _ := cmd.Flags().GetString("assignee")
 		issueType, _ := cmd.Flags().GetString("type")
 		issueType = utils.NormalizeIssueType(issueType) // Expand aliases (mr→merge-request, etc.)
@@ -1259,8 +1263,8 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().StringP("status", "s", "", "Filter by stored status (open, in_progress, blocked, deferred, closed). Comma-separated for multiple: --status open,in_progress")
-	listCmd.Flags().String("state", "", "Alias for --status")
+	listCmd.Flags().StringSliceP("status", "s", nil, "Filter by stored status (open, in_progress, blocked, deferred, closed). Repeatable or comma-separated for multiple: -s open -s in_progress, or --status open,in_progress")
+	listCmd.Flags().StringSlice("state", nil, "Alias for --status")
 	_ = listCmd.Flags().MarkHidden("state")
 	registerPriorityFlag(listCmd, "")
 	listCmd.Flags().StringP("assignee", "a", "", "Filter by assignee")

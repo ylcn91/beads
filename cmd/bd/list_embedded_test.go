@@ -174,6 +174,31 @@ func TestEmbeddedList(t *testing.T) {
 		}
 	})
 
+	t.Run("status_repeatable_GH3916", func(t *testing.T) {
+		// Repeated -s/--status must OR-combine, not silently overwrite (GH#3916).
+		inprog := bdCreate(t, bd, dir, "Repeatable status probe", "--type", "task")
+		bdUpdate(t, bd, dir, inprog.ID, "--status", "in_progress")
+
+		issues := bdListJSON(t, bd, dir, "--status", "open", "--status", "in_progress")
+		var sawOpen, sawInProgress bool
+		for _, issue := range issues {
+			switch issue.Status {
+			case types.StatusOpen:
+				sawOpen = true
+			case types.StatusInProgress:
+				if issue.ID == inprog.ID {
+					sawInProgress = true
+				}
+			}
+		}
+		if !sawInProgress {
+			t.Error("repeated --status dropped in_progress (second flag overwrote the first)")
+		}
+		if !sawOpen {
+			t.Error("repeated --status dropped open issues")
+		}
+	})
+
 	t.Run("all", func(t *testing.T) {
 		issues := bdListJSON(t, bd, dir, "--all")
 		if !containsID(issues, seed.openBug) {
