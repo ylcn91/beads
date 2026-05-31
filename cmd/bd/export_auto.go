@@ -578,14 +578,37 @@ func saveExportAutoState(beadsDir string, state *exportAutoState) {
 // worktree (the .beads/redirect case, where staging would pollute the
 // main repo's index). See GH#3311, scrubGitHookEnv, hookWorkTreeRoot.
 func gitAddFile(path string) error {
-	if wt := hookWorkTreeRoot(); wt != "" && !pathInsideDir(path, wt) {
-		// Running inside a hook AND target is outside the hook's worktree.
-		// Staging here would pollute a different repo's index; skip.
-		return nil
+	// hookIndex, when non-empty, is the absolute path of the index the parent
+	// hook wants us to stage into (GH#4080, the pathspec-commit case).
+	var hookIndex string
+	if wt := hookWorkTreeRoot(); wt != "" {
+		if !pathInsideDir(path, wt) {
+			// Running inside a hook AND target is outside the hook's worktree.
+			// Staging here would pollute a different repo's index; skip.
+			return nil
+		}
+		// GH#4080: `git commit -- <pathspec>` runs hooks with GIT_INDEX_FILE
+		// pointing at a temporary pathspec index, while the parent commit holds
+		// .git/index.lock. The target is inside this worktree (checked above), so
+		// stage into that same temp index — otherwise the scrubbed env falls back
+		// to .git/index, which fails because the parent owns its lock. Resolve to
+		// an absolute path: git sets GIT_INDEX_FILE relative to the worktree root,
+		// but we run `git add` with cmd.Dir set to the file's directory.
+		if idx := os.Getenv("GIT_INDEX_FILE"); idx != "" {
+			if !filepath.IsAbs(idx) {
+				idx = filepath.Join(wt, idx)
+			}
+			hookIndex = idx
+		}
 	}
 
 	env := scrubGitHookEnv(os.Environ())
-	if lockPath, err := gitIndexLockPath(path, env); err == nil && lockPath != "" {
+	if hookIndex != "" {
+		// Stage into the parent commit's index. Skip the .git/index lock
+		// preflight: that lock belongs to the in-progress parent commit and is
+		// expected here — we are writing to GIT_INDEX_FILE, not .git/index.
+		env = append(env, "GIT_INDEX_FILE="+hookIndex)
+	} else if lockPath, err := gitIndexLockPath(path, env); err == nil && lockPath != "" {
 		if _, statErr := os.Stat(lockPath); statErr == nil {
 			return fmt.Errorf("git index is locked at %s; skipping auto-stage", lockPath)
 		} else if !os.IsNotExist(statErr) {

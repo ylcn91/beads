@@ -598,6 +598,114 @@ func TestGitAddFile_CapturesLockedIndexFailure(t *testing.T) {
 	}
 }
 
+// TestGitAddFile_PathspecCommitHook_StagesIntoHookIndex is the regression guard
+// for GH#4080: during `git commit -- <pathspec>`, hooks run with GIT_INDEX_FILE
+// pointing at a temporary pathspec index while the parent commit holds
+// .git/index.lock. gitAddFile must stage the generated file into that temp
+// index — not fall back to .git/index (which fails on the held lock).
+func TestGitAddFile_PathspecCommitHook_StagesIntoHookIndex(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "bd-gh4080-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// runGitClean runs git with the ambient process env (no GIT_* hook vars).
+	runGitClean := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGitClean("init", "-q")
+	runGitClean("config", "user.email", "t@t")
+	runGitClean("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitClean("add", "README.md")
+	runGitClean("commit", "-qm", "init")
+
+	gitDir := filepath.Join(repo, ".git")
+	target := filepath.Join(repo, ".beads", "issues.jsonl")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte(`{"id":"x"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build the temporary pathspec index as a copy of HEAD, mirroring what
+	// `git commit -- <pathspec>` prepares before invoking hooks.
+	tempIndex := filepath.Join(gitDir, "next-index-test")
+	readTree := exec.Command("git", "read-tree", "HEAD")
+	readTree.Dir = repo
+	readTree.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_INDEX_FILE="+tempIndex)
+	if out, err := readTree.CombinedOutput(); err != nil {
+		t.Fatalf("git read-tree into temp index: %v\n%s", err, out)
+	}
+
+	// Simulate the parent commit holding the real index lock.
+	lockPath := filepath.Join(gitDir, "index.lock")
+	if err := os.WriteFile(lockPath, []byte("held by parent commit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hook environment: GIT_DIR + GIT_INDEX_FILE pointing at the temp index.
+	t.Setenv("GIT_DIR", gitDir)
+	t.Setenv("GIT_INDEX_FILE", tempIndex)
+	t.Chdir(repo)
+
+	if err := gitAddFile(target); err != nil {
+		t.Fatalf("gitAddFile must stage into the hook index despite index.lock, got: %v", err)
+	}
+
+	// The temp (hook) index must now contain the staged file.
+	lsTemp := exec.Command("git", "ls-files", "--stage")
+	lsTemp.Dir = repo
+	lsTemp.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_INDEX_FILE="+tempIndex)
+	tempStaged, err := lsTemp.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ls-files (temp index): %v\n%s", err, tempStaged)
+	}
+	if !strings.Contains(string(tempStaged), ".beads/issues.jsonl") {
+		t.Errorf("expected .beads/issues.jsonl in the hook index, got:\n%s", tempStaged)
+	}
+
+	// The real index must be untouched (gitAddFile wrote only to GIT_INDEX_FILE).
+	_ = os.Remove(lockPath)
+	mainEnv := []string{"GIT_DIR=" + gitDir}
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "GIT_INDEX_FILE=") && !strings.HasPrefix(e, "GIT_DIR=") {
+			mainEnv = append(mainEnv, e)
+		}
+	}
+	lsMain := exec.Command("git", "ls-files", "--stage")
+	lsMain.Dir = repo
+	lsMain.Env = mainEnv
+	mainStaged, err := lsMain.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ls-files (main index): %v\n%s", err, mainStaged)
+	}
+	if strings.Contains(string(mainStaged), ".beads/issues.jsonl") {
+		t.Errorf("real .git/index must not be touched, got:\n%s", mainStaged)
+	}
+}
+
 func TestAutoExportGitAddFailureExitsNonZero(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
