@@ -576,12 +576,14 @@ bd mol wisp gc [flags]
 **Flags:**
 
 ```
-      --age string             Age threshold for abandoned wisp detection (default "1h")
-      --all                    Also clean closed wisps older than threshold
-      --closed                 Delete all closed wisps (ignores --age threshold)
-      --dry-run                Preview what would be cleaned
-      --exclude-type strings   Exclude wisps of these types from GC (comma-separated, e.g., agent,rig)
-  -f, --force                  Actually delete (default: preview only)
+      --age string              Age threshold for abandoned wisp detection (default "1h")
+      --all                     Also clean closed wisps older than threshold
+      --closed                  Delete all closed wisps (ignores --age threshold)
+      --dry-run                 Preview what would be cleaned
+      --exclude-label strings   Protect wisps that have ANY of these labels from GC
+      --exclude-type strings    Exclude wisps of these types from GC (comma-separated, e.g., agent,rig)
+  -f, --force                   Actually delete (default: preview only)
+      --label strings           Only GC wisps that have ALL of these labels (scope GC to your own wisps for concurrent-worker safety)
 ```
 
 #### bd mol wisp list

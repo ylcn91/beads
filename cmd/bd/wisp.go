@@ -568,6 +568,8 @@ func runWispGC(cmd *cobra.Command, args []string) {
 	closedMode, _ := cmd.Flags().GetBool("closed")
 	force, _ := cmd.Flags().GetBool("force")
 	excludeTypeStrs, _ := cmd.Flags().GetStringSlice("exclude-type")
+	labels, _ := cmd.Flags().GetStringSlice("label")
+	excludeLabels, _ := cmd.Flags().GetStringSlice("exclude-label")
 
 	// Parse age threshold
 	ageThreshold := time.Hour // Default 1 hour
@@ -592,16 +594,18 @@ func runWispGC(cmd *cobra.Command, args []string) {
 
 	// --closed mode: purge all closed wisps (batch deletion)
 	if closedMode {
-		runWispPurgeClosed(ctx, dryRun, force, excludeTypes)
+		runWispPurgeClosed(ctx, dryRun, force, excludeTypes, labels, excludeLabels)
 		return
 	}
 
 	// Query wisps from main database using Ephemeral filter
 	ephemeralFlag := true
 	filter := types.IssueFilter{
-		Ephemeral:    &ephemeralFlag,
-		ExcludeTypes: excludeTypes,
-		Limit:        5000,
+		Ephemeral:     &ephemeralFlag,
+		ExcludeTypes:  excludeTypes,
+		Labels:        labels,
+		ExcludeLabels: excludeLabels,
+		Limit:         5000,
 	}
 	issues, err := store.SearchIssues(ctx, "", filter)
 	if err != nil {
@@ -713,15 +717,17 @@ func runWispGC(cmd *cobra.Command, args []string) {
 
 // runWispPurgeClosed deletes all closed wisps using batch deletion.
 // Safe by default: preview-only without --force.
-func runWispPurgeClosed(ctx context.Context, dryRun bool, force bool, excludeTypes []types.IssueType) {
+func runWispPurgeClosed(ctx context.Context, dryRun bool, force bool, excludeTypes []types.IssueType, labels, excludeLabels []string) {
 	// Query closed ephemeral issues
 	statusClosed := types.StatusClosed
 	ephemeralTrue := true
 	filter := types.IssueFilter{
-		Status:       &statusClosed,
-		Ephemeral:    &ephemeralTrue,
-		ExcludeTypes: excludeTypes,
-		Limit:        5000,
+		Status:        &statusClosed,
+		Ephemeral:     &ephemeralTrue,
+		ExcludeTypes:  excludeTypes,
+		Labels:        labels,
+		ExcludeLabels: excludeLabels,
+		Limit:         5000,
 	}
 
 	closedIssues, err := store.SearchIssues(ctx, "", filter)
@@ -821,6 +827,8 @@ func init() {
 	wispGCCmd.Flags().Bool("closed", false, "Delete all closed wisps (ignores --age threshold)")
 	wispGCCmd.Flags().BoolP("force", "f", false, "Actually delete (default: preview only)")
 	wispGCCmd.Flags().StringSlice("exclude-type", nil, "Exclude wisps of these types from GC (comma-separated, e.g., agent,rig)")
+	wispGCCmd.Flags().StringSlice("label", nil, "Only GC wisps that have ALL of these labels (scope GC to your own wisps for concurrent-worker safety)")
+	wispGCCmd.Flags().StringSlice("exclude-label", nil, "Protect wisps that have ANY of these labels from GC")
 
 	wispCmd.AddCommand(wispCreateCmd)
 	wispCmd.AddCommand(wispListCmd)
