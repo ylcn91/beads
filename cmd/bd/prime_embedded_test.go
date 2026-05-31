@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -98,6 +99,35 @@ func TestEmbeddedPrime(t *testing.T) {
 		}
 		if strings.Contains(out, "Essential Commands") {
 			t.Errorf("expected --memories-only to omit full command guide: %s", out)
+		}
+	})
+
+	t.Run("prime_memories_only_ignores_custom_PRIME_md", func(t *testing.T) {
+		// A custom .beads/PRIME.md overrides the default prime output, but
+		// --memories-only must still emit only memories, never the custom
+		// document (GH#3941).
+		primePath := filepath.Join(dir, ".beads", "PRIME.md")
+		const marker = "CUSTOM-PRIME-MARKER-do-not-emit"
+		if err := os.WriteFile(primePath, []byte("# Custom\n"+marker+"\n"), 0o644); err != nil {
+			t.Fatalf("write custom PRIME.md: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Remove(primePath) })
+
+		// Core of GH#3941: --memories-only must NOT emit the custom PRIME.md,
+		// and must still produce the memories-only envelope (truncation
+		// directive), not the full custom document.
+		out := bdPrime(t, bd, dir, "--memories-only")
+		if strings.Contains(out, marker) {
+			t.Errorf("--memories-only must not emit the custom PRIME.md: %s", out)
+		}
+		if !strings.HasPrefix(out, primeTruncationDirective) {
+			t.Errorf("--memories-only should emit the memories envelope, got: %s", out)
+		}
+
+		// Sanity: plain prime DOES honor the custom override.
+		plain := bdPrime(t, bd, dir)
+		if !strings.Contains(plain, marker) {
+			t.Errorf("plain prime should emit the custom PRIME.md: %s", plain)
 		}
 	})
 }

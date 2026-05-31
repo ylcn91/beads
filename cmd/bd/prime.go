@@ -143,11 +143,13 @@ Config options:
 		// This allows users to disable git ops in session close protocol via config
 		stealthMode := primeStealthMode || config.GetBool("no-git-ops")
 
-		// Check for custom PRIME.md override (unless --export flag)
-		// This allows users to fully customize workflow instructions
+		// Check for custom PRIME.md override (unless --export flag).
+		// This allows users to fully customize workflow instructions.
 		// Check local .beads/ first (clone-specific override), then the
-		// resolved workspace location.
-		if !primeExportMode {
+		// resolved workspace location. --memories-only also bypasses the
+		// override: that mode must emit only the memories section, never the
+		// full custom PRIME.md (GH#3941).
+		if !primeExportMode && !primeMemoriesOnly {
 			localPrimePath := filepath.Join(".beads", "PRIME.md")
 			redirectedPrimePath := filepath.Join(beadsDir, "PRIME.md")
 
