@@ -143,6 +143,17 @@ func buildReadyWorkPredicates(ctx context.Context, tx *sql.Tx, filter types.Work
 			args = append(args, label)
 		}
 	}
+	// LabelsAny: issue must carry AT LEAST ONE of the labels (OR semantics).
+	// Without this, bd ready --label-any and directory.labels auto-scoping
+	// silently returned every ready issue (GH#3896).
+	if len(filter.LabelsAny) > 0 {
+		placeholders := make([]string, len(filter.LabelsAny))
+		for i, label := range filter.LabelsAny {
+			placeholders[i] = "?"
+			args = append(args, label)
+		}
+		whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label IN (%s))", tables.Labels, strings.Join(placeholders, ", ")))
+	}
 	if len(filter.ExcludeLabels) > 0 {
 		placeholders := make([]string, len(filter.ExcludeLabels))
 		for i, label := range filter.ExcludeLabels {

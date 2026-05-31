@@ -91,6 +91,29 @@ func TestEmbeddedReady(t *testing.T) {
 		}
 	})
 
+	t.Run("ready_label_any_GH3896", func(t *testing.T) {
+		// bd ready must honor --label-any (OR semantics) — previously it was
+		// silently ignored and returned every ready issue (GH#3896).
+		alpha := bdCreate(t, bd, dir, "GH3896 alpha", "--type", "task", "--label", "gh3896-alpha")
+		bdCreate(t, bd, dir, "GH3896 beta", "--type", "task", "--label", "gh3896-beta")
+
+		cmd := exec.Command(bd, "ready", "--json", "--label-any", "gh3896-alpha")
+		cmd.Dir = dir
+		cmd.Env = bdEnv(dir)
+		stdout, stderr, err := runCommandBuffers(t, cmd)
+		if err != nil {
+			t.Fatalf("bd ready --label-any failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+		}
+
+		var ready []types.IssueWithCounts
+		if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &ready); err != nil {
+			t.Fatalf("parse ready JSON: %v\n%s", err, stdout.String())
+		}
+		if len(ready) != 1 || ready[0].ID != alpha.ID {
+			t.Fatalf("ready --label-any returned %d issue(s), want only %s (gh3896-alpha): %s", len(ready), alpha.ID, stdout.String())
+		}
+	})
+
 	// ===== --json =====
 
 	t.Run("ready_json", func(t *testing.T) {
