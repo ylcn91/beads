@@ -297,7 +297,7 @@ var createCmd = &cobra.Command{
 			repoPath = repoOverride
 		} else {
 			// Auto-routing based on user role
-			userRole, err := routing.DetectUserRole(".")
+			userRole, err := routing.DetectUserRole(roleDetectionDir())
 			if err != nil {
 				debug.Logf("Warning: failed to detect user role: %v\n", err)
 			}

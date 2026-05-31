@@ -629,6 +629,17 @@ func applyChangeDirSelection() {
 	_ = os.Setenv("BEADS_DIR", beadsDir)
 }
 
+// roleDetectionDir returns the directory git-based role/routing detection must
+// run in. With -C, the role must be read from the target directory, not the
+// caller's cwd (GH#4241): -C does not chdir, it only rebinds BEADS_DIR, so a
+// bare "." would otherwise resolve to the caller's repo.
+func roleDetectionDir() string {
+	if d := strings.TrimSpace(changeDir); d != "" {
+		return d
+	}
+	return "."
+}
+
 func restoreChangeDirSelection() {
 	if changeDirEnvSnapshot == nil {
 		return
