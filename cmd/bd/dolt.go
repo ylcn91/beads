@@ -367,7 +367,9 @@ For Hosted Dolt, set DOLT_REMOTE_USER and DOLT_REMOTE_PASSWORD environment
 variables for authentication.
 
 Use --remote to pull from a specific named remote instead of the default.
-The remote must already exist (see 'bd dolt remote add').`,
+The remote must already exist (see 'bd dolt remote add').
+
+Use -v/--verbose to list the commits brought in by a successful pull.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if isDoltLocalOnly() {
 			if jsonOutput {
@@ -384,6 +386,11 @@ The remote must already exist (see 'bd dolt remote add').`,
 		if st == nil {
 			FatalError("no store available")
 		}
+		// Capture HEAD before the pull so --verbose can report what was pulled.
+		var oldHead string
+		if verboseFlag {
+			oldHead, _ = st.GetCurrentCommit(ctx)
+		}
 		remote, _ := cmd.Flags().GetString("remote")
 		if remote != "" {
 			fmt.Printf("Pulling from Dolt remote %q...\n", remote)
@@ -399,6 +406,9 @@ The remote must already exist (see 'bd dolt remote add').`,
 				os.Exit(1)
 			}
 			fmt.Println("Pull complete.")
+			if verboseFlag {
+				printPulledCommits(ctx, st, oldHead)
+			}
 			return
 		}
 		fmt.Println("Pulling from Dolt remote...")
@@ -416,7 +426,64 @@ The remote must already exist (see 'bd dolt remote add').`,
 			os.Exit(1)
 		}
 		fmt.Println("Pull complete.")
+		if verboseFlag {
+			printPulledCommits(ctx, st, oldHead)
+		}
 	},
+}
+
+// commitsSince returns the newest-first commits that come before oldHead in
+// the given log (i.e. the ones a pull brought in). If oldHead is not present
+// (empty, or older than the log window) the whole slice is returned.
+func commitsSince(commits []storage.CommitInfo, oldHead string) []storage.CommitInfo {
+	for i, c := range commits {
+		if c.Hash == oldHead {
+			return commits[:i]
+		}
+	}
+	return commits
+}
+
+// printPulledCommits reports the commits a successful pull brought in, for
+// bd dolt pull --verbose (GH#4068). oldHead is the HEAD captured before the
+// pull; commits newer than it are listed newest-first. Best-effort: any read
+// error degrades to a stderr note rather than failing the (already done) pull.
+func printPulledCommits(ctx context.Context, st storage.DoltStorage, oldHead string) {
+	newHead, err := st.GetCurrentCommit(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verbose: could not read HEAD: %v\n", err)
+		return
+	}
+	if newHead == oldHead {
+		fmt.Println("No new commits.")
+		return
+	}
+	const maxCommits = 50
+	commits, err := st.Log(ctx, maxCommits)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verbose: could not read commit log: %v\n", err)
+		return
+	}
+	pulled := commitsSince(commits, oldHead)
+	if len(pulled) == 0 {
+		return
+	}
+	noun := "commit"
+	if len(pulled) != 1 {
+		noun = "commits"
+	}
+	fmt.Printf("%d %s pulled:\n", len(pulled), noun)
+	for _, c := range pulled {
+		short := c.Hash
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		msg := strings.SplitN(c.Message, "\n", 2)[0]
+		fmt.Printf("  %s  %s\n", short, msg)
+	}
+	if len(pulled) == maxCommits {
+		fmt.Printf("  … (showing first %d)\n", maxCommits)
+	}
 }
 
 var doltCommitCmd = &cobra.Command{

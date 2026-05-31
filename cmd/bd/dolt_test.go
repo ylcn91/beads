@@ -1580,3 +1580,40 @@ func TestRenderLocalDoltStatus(t *testing.T) {
 		}
 	})
 }
+
+// TestCommitsSince covers the bd dolt pull --verbose helper (GH#4068): given a
+// newest-first commit log and the HEAD captured before the pull, it returns
+// exactly the commits the pull introduced.
+func TestCommitsSince(t *testing.T) {
+	log := []storage.CommitInfo{
+		{Hash: "ddddddddd", Message: "newest"},
+		{Hash: "ccccccccc", Message: "newer"},
+		{Hash: "bbbbbbbbb", Message: "old head"},
+		{Hash: "aaaaaaaaa", Message: "older"},
+	}
+
+	t.Run("returns commits ahead of oldHead", func(t *testing.T) {
+		got := commitsSince(log, "bbbbbbbbb")
+		if len(got) != 2 || got[0].Hash != "ddddddddd" || got[1].Hash != "ccccccccc" {
+			t.Fatalf("got %v, want [dddddddd, ccccccccc]", got)
+		}
+	})
+
+	t.Run("oldHead is current HEAD yields nothing", func(t *testing.T) {
+		if got := commitsSince(log, "ddddddddd"); len(got) != 0 {
+			t.Fatalf("got %v, want empty", got)
+		}
+	})
+
+	t.Run("oldHead outside log window returns whole log", func(t *testing.T) {
+		if got := commitsSince(log, "zzzzzzzzz"); len(got) != len(log) {
+			t.Fatalf("got %d commits, want %d", len(got), len(log))
+		}
+	})
+
+	t.Run("empty oldHead returns whole log", func(t *testing.T) {
+		if got := commitsSince(log, ""); len(got) != len(log) {
+			t.Fatalf("got %d commits, want %d", len(got), len(log))
+		}
+	})
+}
