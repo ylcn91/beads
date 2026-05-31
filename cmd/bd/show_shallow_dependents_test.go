@@ -112,10 +112,10 @@ func TestShallowDependentsForJSON_SkipsNilEntries(t *testing.T) {
 	}
 }
 
-// TestIssueDetailsCountOnlyJSON is the regression guard for be-ijck6q:
-// the default bd show --json output must emit dependent_count / comment_count
-// as count-only fields and must NOT include a "dependents" or "comments" key
-// when --include-dependents / --include-comments are not given.
+// TestIssueDetailsCountOnlyJSON is the regression guard for the --count-only
+// fast path (GH#4122): in that mode bd show --json emits dependent_count /
+// comment_count and must NOT include a "dependents" or "comments" key. (The
+// default payload, restored in GH#4122, does include the full arrays.)
 func TestIssueDetailsCountOnlyJSON(t *testing.T) {
 	depCount := int64(42)
 	depnCount := int64(3)

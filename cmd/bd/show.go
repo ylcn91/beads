@@ -32,6 +32,7 @@ var showCmd = &cobra.Command{
 		currentMode, _ := cmd.Flags().GetBool("current")
 		includeDepends, _ := cmd.Flags().GetBool("include-dependents")
 		includeComments, _ := cmd.Flags().GetBool("include-comments")
+		countOnly, _ := cmd.Flags().GetBool("count-only")
 		ctx := rootCtx
 
 		// Helper to format timestamp based on --local-time flag
@@ -143,8 +144,13 @@ var showCmd = &cobra.Command{
 			}
 
 			if jsonOutput {
-				// be-ijck6q: default is count-only (no dependents/comments slice in output).
-				// Use --include-dependents / --include-comments to stream the full lists.
+				// GH#4122: the default payload includes the full dependents and
+				// comments arrays (restoring the pre-#4010 contract). --count-only
+				// opts into the fast path that emits counts but omits the arrays.
+				// --include-dependents / --include-comments remain as explicit
+				// per-list opt-ins under --count-only.
+				wantDepends := includeDepends || !countOnly
+				wantComments := includeComments || !countOnly
 				details := &types.IssueDetails{Issue: *issue}
 				details.Labels, _ = issueStore.GetLabels(ctx, issue.ID)
 				details.Dependencies, _ = issueStore.GetDependenciesWithMetadata(ctx, issue.ID)
@@ -157,9 +163,9 @@ var showCmd = &cobra.Command{
 				cmtCount, _ := issueStore.CountIssueComments(ctx, issue.ID)
 				details.CommentCount = &cmtCount
 
-				// --include-dependents: stream via Iter, shallow-copy each item.
+				// Stream dependents via Iter, shallow-copy each item.
 				// May be slow on hub beads with many dependents.
-				if includeDepends {
+				if wantDepends {
 					iter, err := issueStore.IterDependentsWithMetadata(ctx, issue.ID)
 					if err != nil {
 						FatalErrorRespectJSON("iter dependents %s: %v", issue.ID, err)
@@ -204,9 +210,9 @@ var showCmd = &cobra.Command{
 					}
 				}
 
-				// --include-comments: stream via Iter.
+				// Stream comments via Iter.
 				// May be slow on issues with many comments.
-				if includeComments {
+				if wantComments {
 					iter, err := issueStore.IterIssueComments(ctx, issue.ID)
 					if err != nil {
 						FatalErrorRespectJSON("iter comments %s: %v", issue.ID, err)
@@ -487,6 +493,7 @@ func init() {
 	showCmd.Flags().Bool("current", false, "Show the currently active issue (in-progress, hooked, or last touched)")
 	showCmd.Flags().Bool("include-dependents", false, "Stream full dependent issues in JSON output (--json only; may be slow on hub beads)")
 	showCmd.Flags().Bool("include-comments", false, "Stream full comment bodies in JSON output (--json only; may be slow on issues with many comments)")
+	showCmd.Flags().Bool("count-only", false, "JSON fast path: emit dependent/comment counts only, omitting the full arrays (--json only)")
 	showCmd.ValidArgsFunction = issueIDCompletion
 	rootCmd.AddCommand(showCmd)
 }

@@ -167,7 +167,7 @@ func TestEmbeddedShow(t *testing.T) {
 		_, _ = store.AddIssueComment(t.Context(), issue.ID, "tester", "A comment")
 		store.Close() // release flock before subprocess
 
-		// Comments are count-only by default; --include-comments streams them.
+		// GH#4122: the default --json payload includes the full comments array.
 		out, err := bdRunWithFlockRetry(t, bd, dir, "show", issue.ID, "--json", "--include-comments")
 		if err != nil {
 			t.Fatalf("bd show --include-comments failed: %v\n%s", err, out)
@@ -189,6 +189,58 @@ func TestEmbeddedShow(t *testing.T) {
 		comments, _ := m["comments"].([]interface{})
 		if len(comments) == 0 {
 			t.Error("expected comments in JSON output with --include-comments")
+		}
+	})
+
+	t.Run("show_json_default_includes_comments_count_only_omits", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Default payload show", "--type", "task")
+		store := openStore(t, beadsDir, "ts")
+		_, _ = store.AddIssueComment(t.Context(), issue.ID, "tester", "A comment")
+		store.Close() // release flock before subprocess
+
+		parse := func(out []byte) map[string]interface{} {
+			s := strings.TrimSpace(string(out))
+			if start := strings.IndexAny(s, "[{"); start >= 0 {
+				s = s[start:]
+			}
+			var m map[string]interface{}
+			if strings.HasPrefix(s, "[") {
+				var arr []map[string]interface{}
+				if jerr := json.Unmarshal([]byte(s), &arr); jerr != nil || len(arr) == 0 {
+					t.Fatalf("parse show JSON array: %v\n%s", jerr, s)
+				}
+				return arr[0]
+			}
+			if jerr := json.Unmarshal([]byte(s), &m); jerr != nil {
+				t.Fatalf("parse show JSON: %v\n%s", jerr, s)
+			}
+			return m
+		}
+
+		// Default (no flags): full comments array present (GH#4122 restores this).
+		out, err := bdRunWithFlockRetry(t, bd, dir, "show", issue.ID, "--json")
+		if err != nil {
+			t.Fatalf("bd show --json failed: %v\n%s", err, out)
+		}
+		m := parse(out)
+		if comments, _ := m["comments"].([]interface{}); len(comments) == 0 {
+			t.Errorf("expected comments in default JSON output, got: %v", m["comments"])
+		}
+		if _, ok := m["comment_count"]; !ok {
+			t.Error("expected comment_count in default JSON output")
+		}
+
+		// --count-only: fast path omits the comments array but keeps the count.
+		out, err = bdRunWithFlockRetry(t, bd, dir, "show", issue.ID, "--json", "--count-only")
+		if err != nil {
+			t.Fatalf("bd show --json --count-only failed: %v\n%s", err, out)
+		}
+		m = parse(out)
+		if _, ok := m["comments"]; ok {
+			t.Errorf("expected no comments key with --count-only, got: %v", m["comments"])
+		}
+		if _, ok := m["comment_count"]; !ok {
+			t.Error("expected comment_count with --count-only")
 		}
 	})
 

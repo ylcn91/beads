@@ -23,6 +23,7 @@ bd show [id...] [--id=<id>...] [--current] [flags]
 ```
       --as-of string         Show issue as it existed at a specific commit hash or branch (requires Dolt)
       --children             Show only the children of this issue
+      --count-only           JSON fast path: emit dependent/comment counts only, omitting the full arrays (--json only)
       --current              Show the currently active issue (in-progress, hooked, or last touched)
       --id stringArray       Issue ID (use for IDs that look like flags, e.g., --id=gt--xyz)
       --include-comments     Stream full comment bodies in JSON output (--json only; may be slow on issues with many comments)
