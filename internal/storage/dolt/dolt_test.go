@@ -1928,9 +1928,6 @@ func TestDoltStoreGetReadyWork(t *testing.T) {
 }
 
 func TestDoltStoreGetReadyWorkWaitsForChildrenOfSpawner(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping slow Dolt integration test in short mode")
-	}
 
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
